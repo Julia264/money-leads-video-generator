@@ -46,7 +46,7 @@ def generate_video():
         clip = ImageSequenceClip(video_frames, fps=500)
         
         # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
-        clip = clip.set_duration(5)  # Set video duration to 5 seconds
+        clip = clip.with_duration(5)  # Set video duration to 5 seconds
         
         # Apply a resizing (zoom effect) and set the video resolution
         video_clip = clip.fx(resize.Resize, width=1920)  # Apply resizing to 1920px width
