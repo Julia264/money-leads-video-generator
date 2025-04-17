@@ -26,29 +26,24 @@ def index():
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
+    # Get the uploaded image
     image_file = request.files["image"]
-
-    
-    # Open and process the image
     img = Image.open(image_file).convert("RGB")
-    img = img.resize((384, 384))
+    img = img.resize((384, 384))  # Resize to fit the model input
 
-    # Convert image to tensor format
-    img_tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
-    img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
+    # Convert image to tensor and pass it to the pipeline
+    img_tensor = torch.tensor(np.array(img)).unsqueeze(0).float() / 255.0  # Normalize the image
 
-    # Generate video frames based on image and prompt
-    video_frames = pipe( init_image=img_tensor, num_frames=6).frames[0]
+    # Generate video from the image (num_frames is set to 6 in this example)
+    video_frames = pipe(img_tensor, num_frames=6).frames[0]
 
-    # Ensure video_frames is a list of images
-    if isinstance(video_frames, Image.Image):
-        video_frames = [video_frames]
-
-    # Save video
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-        clip = ImageSequenceClip([np.array(frame) for frame in video_frames], fps=7)
+        clip = ImageSequenceClip(video_frames, fps=7)
         clip.write_videofile(temp.name, codec="libx264", audio=False)
+
+        # Send the generated video back to the client
         return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output.mp4")
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
