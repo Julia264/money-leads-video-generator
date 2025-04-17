@@ -35,7 +35,7 @@ def generate_video():
     img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)  # Add batch dimension and permute to [B, C, H, W]
 
     # Generate video from the image (num_frames is set to 6 in this example)
-     video_frames = pipe(img_tensor, num_frames=6).frames[0]
+    video_frames = pipe(img_tensor, num_frames=6).frames[0]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=7)
