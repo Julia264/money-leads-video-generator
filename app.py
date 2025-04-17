@@ -27,7 +27,7 @@ def index():
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
     image_file = request.files["image"]
-    prompt = request.form["prompt"]
+
     
     # Open and process the image
     img = Image.open(image_file).convert("RGB")
@@ -38,7 +38,7 @@ def generate_video():
     img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
 
     # Generate video frames based on image and prompt
-    video_frames = pipe(prompt=prompt, init_image=img_tensor, num_frames=6).frames[0]
+    video_frames = pipe( init_image=img_tensor, num_frames=6).frames[0]
 
     # Ensure video_frames is a list of images
     if isinstance(video_frames, Image.Image):
