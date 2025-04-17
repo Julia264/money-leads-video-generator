@@ -6,7 +6,7 @@ import torch
 import tempfile
 from moviepy import ImageSequenceClip
 import os
-import numpy 
+import numpy as np 
 
 app = Flask(__name__, static_url_path='/static')
 CORS(app)
