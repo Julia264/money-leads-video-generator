@@ -33,7 +33,7 @@ def generate_video():
     img = Image.open(image_file).convert("RGB")
     img = img.resize((512, 512))
 
-    video_frames = pipe(img, num_frames=14).frames[0]
+    video_frames = pipe(img, num_frames=6).frames[0]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=7)
