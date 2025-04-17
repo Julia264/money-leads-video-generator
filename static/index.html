@@ -48,3 +48,53 @@
   </script>
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Money Leads Video Generator</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Money Leads Video Generator</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+      <input type="file" name="image" accept="image/*" required />
+      <button type="submit">Generate Video</button>
+    </form>
+
+    <div id="loader" class="loader-container" style="display: none;">
+      <div class="loader"></div>
+      <p>Processing... Please wait</p>
+    </div>
+
+    <video id="outputVideo" controls style="display: none; margin-top: 20px;"></video>
+  </div>
+
+  <script>
+    const form = document.getElementById('uploadForm');
+    const loader = document.getElementById('loader');
+    const video = document.getElementById('outputVideo');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      loader.style.display = 'block';
+      video.style.display = 'none';
+
+      const formData = new FormData(form);
+      const response = await fetch('/generate-video', {
+        method: 'POST',
+        body: formData
+      });
+
+      const blob = await response.blob();
+      const videoUrl = URL.createObjectURL(blob);
+
+      video.src = videoUrl;
+      video.style.display = 'block';
+      loader.style.display = 'none';
+    });
+  </script>
+</body>
+</html>
