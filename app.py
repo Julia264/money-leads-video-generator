@@ -29,7 +29,7 @@ def generate_video():
     # Get the uploaded image
     image_file = request.files["image"]
     img = Image.open(image_file).convert("RGB")
-    img = img.resize((384, 384))  # Resize to fit the model input
+    img = img.resize((224, 224))  # Resize to fit the model input
 
     # Convert image to tensor and pass it to the pipeline
     img_tensor = torch.tensor(np.array(img)).unsqueeze(0).float() / 255.0  # Normalize the image
