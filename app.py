@@ -49,7 +49,7 @@ def generate_video():
         clip = clip.with_duration(5)  # Set video duration to 5 seconds
         
         # Apply a resizing (zoom effect) and set the video resolution
-        video_clip = clip.fx(resize.Resize, width=1920)  # Apply resizing to 1920px width
+        video_clip = clip.fx(resize.resize, width=1920)  # Apply resizing to 1920px width
         
         # Optionally, apply a zoom-in effect (lambda t: 1 + 0.1 * t creates a zoom-in over time)
         video_clip = video_clip.resize(lambda t: 1 + 0.1 * t)
