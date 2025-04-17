@@ -31,7 +31,7 @@ def index():
 def generate_video():
     image_file = request.files["image"]
     img = Image.open(image_file).convert("RGB")
-    img = img.resize((512, 512))
+    img = img.resize((384, 384))
 
     video_frames = pipe(img, num_frames=6).frames[0]
 
