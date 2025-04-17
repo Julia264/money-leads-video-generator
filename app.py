@@ -3,8 +3,8 @@ from moviepy import ImageSequenceClip
 import tempfile
 import os
 import numpy as np
-from moviepy.editor import VideoFileClip
-from moviepy.editor import concatenate_videoclips, fadein
+from moviepy import VideoFileClip
+from moviepy import concatenate_videoclips, fadein
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
