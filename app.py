@@ -7,7 +7,7 @@ import tempfile
 from moviepy import ImageSequenceClip
 import numpy as np
 
-app = Flask(_name_, static_url_path='/static')
+app = Flask(__name__, static_url_path='/static')
 CORS(app)
 
 # Load the pipeline once
