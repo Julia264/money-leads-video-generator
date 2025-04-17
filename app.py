@@ -27,7 +27,7 @@ def index():
 def generate_video():
     image_file = request.files["image"]
     img = Image.open(image_file).convert("RGB")
-    img = img.resize((384, 384))
+    img = img.resize((224, 224))
 
     # Convert the PIL image to a tensor (if needed)
     img_tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
