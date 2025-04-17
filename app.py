@@ -1,10 +1,28 @@
-import subprocess
-from moviepy import ImageSequenceClip
+from flask import Flask, request, send_file, send_from_directory
+from flask_cors import CORS
+from PIL import Image
+from diffusers import StableVideoDiffusionPipeline
+import torch
 import tempfile
-import os
+from moviepy import ImageSequenceClip
+from moviepy.editor import VideoFileClip
 import numpy as np
-from moviepy import VideoFileClip
-from moviepy import concatenate_videoclips, fadein
+
+app = Flask(__name__, static_url_path='/static')
+
+CORS(app)
+
+# Load the pipeline once
+pipe = StableVideoDiffusionPipeline.from_pretrained(
+    "stabilityai/stable-video-diffusion-img2vid",
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+)
+pipe.to("cuda" if torch.cuda.is_available() else "cpu")
+
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
@@ -51,3 +69,7 @@ def generate_video():
 
         # Send the generated video back to the client
         return send_file(final_output_path, mimetype="video/mp4", as_attachment=True, download_name="final_video_with_motion.mp4")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
