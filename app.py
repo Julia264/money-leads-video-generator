@@ -44,9 +44,9 @@ def generate_video():
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=500)
         # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
-        clip = clip.with_duration(5).resize(width=1920)  # Set video duration to 5 seconds
+        clip = clip.with_duration(5).resized(width=1920)  # Set video duration to 5 seconds
         # Apply a zoom-in effect (lambda t: 1 + 0.1 * t creates a zoom-in over time)
-        zoomed_clip = image_clip.resize(lambda t: 1 + 0.1 * t)
+        zoomed_clip = image_clip.resized(lambda t: 1 + 0.1 * t)
         zoomed_clip = zoomed_clip.fadein(1)  # Fade in over 1 second
         clip.write_videofile(temp.name, codec="libx264", audio=False)
 
