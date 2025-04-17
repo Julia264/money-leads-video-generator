@@ -17,7 +17,7 @@ pipe = CogVideoXImageToVideoPipeline.from_pretrained(
     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
 )
 pipe.to(pipe.to("cpu")
-
+       )
 
 
 @app.route("/")
