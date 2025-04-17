@@ -5,9 +5,9 @@ from diffusers import CogVideoXImageToVideoPipeline
 import torch
 import tempfile
 from moviepy import ImageSequenceClip
-import os
 import numpy as np 
-
+import os
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 app = Flask(__name__, static_url_path='/static')
 CORS(app)
 
@@ -16,7 +16,8 @@ pipe = CogVideoXImageToVideoPipeline.from_pretrained(
     "THUDM/CogVideoX-5b-I2V",
     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
 )
-pipe.to("cuda" if torch.cuda.is_available() else "cpu")
+pipe.to(pipe.to("cpu")
+
 
 
 @app.route("/")
@@ -40,7 +41,7 @@ def generate_video():
     video_frames = pipe(
         prompt=prompt,
         image=img_tensor,
-        num_frames=6,
+        num_frames=4,
         num_inference_steps=50,
         guidance_scale=7.5,
         generator=torch.manual_seed(42),
