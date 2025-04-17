@@ -25,21 +25,18 @@ def index():
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
-    # Get the uploaded image
+    # Get the uploaded image and prompt
     image_file = request.files["image"]
+    prompt = request.form["prompt"]  # Assuming the user submits a prompt
     img = Image.open(image_file).convert("RGB")
     img = img.resize((224, 224))  # Resize to fit the model input size (if needed)
 
-    # Convert image to numpy array, normalize, and then to tensor
-    img_array = np.array(img) / 255.0  # Normalize the image to [0, 1]
-    img_tensor = torch.tensor(img_array, dtype=torch.float32).unsqueeze(0).permute(0, 3, 1, 2)  # [B, C, H, W]
+    # Convert image to tensor and normalize it
+    img_array = np.array(img) / 255.0  # Normalize the image
+    img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)  # Add batch dimension and permute to [B, C, H, W]
 
-    # Ensure model is running on the correct device (GPU/CPU)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    img_tensor = img_tensor.to(device)
-
-    # Generate video from the image
-    video_frames = pipe(init_image=img_tensor, num_frames=6).frames[0]
+    # Generate video from the image using the prompt (num_frames is set to 6 in this example)
+    video_frames = pipe(prompt=prompt, init_image=img_tensor, num_frames=6).frames[0]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=7)
