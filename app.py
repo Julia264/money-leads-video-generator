@@ -5,7 +5,7 @@ from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
 from moviepy import ImageSequenceClip,ImageClip
-from moviepy.video.fx.all import resize
+from moviepy.video.fx import Resize
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
