@@ -29,10 +29,11 @@ def generate_video():
     # Get the uploaded image
     image_file = request.files["image"]
     img = Image.open(image_file).convert("RGB")
-    img = img.resize((224, 224))  # Resize to fit the model input
+    img = img.resize((224, 224))  # Resize to fit the model input size (if needed)
 
-    # Convert image to tensor and pass it to the pipeline
-    img_tensor = torch.tensor(np.array(img)).unsqueeze(0).float() / 255.0  # Normalize the image
+    # Convert image to tensor and normalize it
+    img_array = np.array(img) / 255.0  # Normalize the image
+    img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)  # Add batch dimension and permute to [B, C, H, W]
 
     # Generate video from the image (num_frames is set to 6 in this example)
     video_frames = pipe(img_tensor, num_frames=6).frames[0]
