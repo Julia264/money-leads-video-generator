@@ -4,11 +4,10 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy import ImageSequenceClip
+from moviepy.editor import ImageSequenceClip
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
-
 CORS(app)
 
 # Load the pipeline once
@@ -21,7 +20,6 @@ pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
-
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
@@ -43,7 +41,6 @@ def generate_video():
 
         # Send the generated video back to the client
         return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output.mp4")
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
