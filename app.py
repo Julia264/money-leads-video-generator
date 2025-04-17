@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, render_template, send_from_directory
+from flask import Flask, request, send_file, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
@@ -25,9 +25,8 @@ def index():
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
-    # Get the uploaded image and prompt
+    # Get the uploaded image
     image_file = request.files["image"]
-    prompt = request.form["prompt"]  # Assuming the user submits a prompt
     img = Image.open(image_file).convert("RGB")
     img = img.resize((224, 224))  # Resize to fit the model input size (if needed)
 
@@ -35,8 +34,8 @@ def generate_video():
     img_array = np.array(img) / 255.0  # Normalize the image
     img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)  # Add batch dimension and permute to [B, C, H, W]
 
-    # Generate video from the image using the prompt (num_frames is set to 6 in this example)
-    video_frames = pipe(prompt=prompt, init_image=img_tensor, num_frames=6).frames[0]
+    # Generate video from the image (num_frames is set to 6 in this example)
+    video_frames = pipe(init_image=img_tensor, num_frames=6).frames[0]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=7)
