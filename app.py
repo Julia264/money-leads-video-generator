@@ -19,7 +19,7 @@ pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
 @app.route("/")
 def index():
-    return send_file("index.html")
+    return send_from_directory("static", "index.html")
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
