@@ -4,7 +4,7 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy import ImageSequenceClip
+from moviepy import ImageSequenceClip,ImageClip
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
