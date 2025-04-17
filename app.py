@@ -5,7 +5,6 @@ from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
 from moviepy import ImageSequenceClip
-from moviepy import VideoFileClip
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
@@ -23,7 +22,6 @@ pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 def index():
     return send_from_directory("static", "index.html")
 
-
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
     # Get the uploaded image
@@ -37,13 +35,13 @@ def generate_video():
     img_tensor = img_tensor.to(torch.float32)
 
     # Generate video from the image (num_frames is set to 6 in this example)
-    video_frames = pipe(img_tensor, num_frames=6).frames[0]
+    video_frames = pipe(init_image=img_tensor, num_frames=6).frames[0]
 
     # Convert each frame to a NumPy array from PIL Image
     video_frames_np = [np.array(frame) for frame in video_frames]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-        clip = ImageSequenceClip(video_frames, fps=7)
+        clip = ImageSequenceClip(video_frames_np, fps=7)
         temp_path = temp.name
         clip.write_videofile(temp_path, codec="libx264", audio=False)
 
@@ -73,7 +71,6 @@ def generate_video():
 
         # Send the generated video back to the client
         return send_file(final_output_path, mimetype="video/mp4", as_attachment=True, download_name="final_video_with_motion.mp4")
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
