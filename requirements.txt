@@ -5,3 +5,4 @@ diffusers==0.18.0
 Pillow==9.5.0
 moviepy==2.1.2
 numpy==1.26.4
+cogvideo
