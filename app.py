@@ -4,7 +4,8 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
+
 
 app = Flask(__name__)
 CORS(app)
