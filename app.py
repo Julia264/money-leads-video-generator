@@ -38,6 +38,9 @@ def generate_video():
     # Generate video from the image (num_frames is set to 6 in this example)
     video_frames = pipe(img_tensor, num_frames=6).frames[0]
 
+    # Convert each frame to a numpy array if it's a PIL image
+    video_frames = [np.array(frame) for frame in video_frames]
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=7)
         clip.write_videofile(temp.name, codec="libx264", audio=False)
