@@ -4,8 +4,8 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy import ImageSequenceClip,ImageClip
-from moviepy.video.fx import Resize
+from moviepy import ImageSequenceClip, VideoFileClip
+from moviepy.video.fx import resize
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
@@ -44,16 +44,23 @@ def generate_video():
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=500)
+        
         # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
-        clip = clip.with_duration(5) # Set video duration to 5 seconds
-        video_clip = video_clip.fx(Resize, width=1920)
-        # Apply a zoom-in effect (lambda t: 1 + 0.1 * t creates a zoom-in over time)
-        zoomed_clip = image_clip.resize(lambda t: 1 + 0.1 * t)
-        zoomed_clip = zoomed_clip.fadein(1)  # Fade in over 1 second
-        clip.write_videofile(temp.name, codec="libx264", audio=False)
+        clip = clip.set_duration(5)  # Set video duration to 5 seconds
+        
+        # Apply a resizing (zoom effect) and set the video resolution
+        video_clip = clip.fx(resize.resize, width=1920)  # Apply resizing to 1920px width
+        
+        # Optionally, apply a zoom-in effect (lambda t: 1 + 0.1 * t creates a zoom-in over time)
+        video_clip = video_clip.resize(lambda t: 1 + 0.1 * t)
+        
+        # Optionally, apply a fade-in effect to make it smoother
+        video_clip = video_clip.fadein(1)  # 1 second fade-in effect
+        
+        video_clip.write_videofile(temp.name, codec="libx264", audio=False)
 
         # Send the generated video back to the client
-        return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output.mp4")
+        return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
