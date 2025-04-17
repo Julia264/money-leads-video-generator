@@ -1,12 +1,11 @@
-from flask import Flask, request, send_file, render_template,send_from_directory
+from flask import Flask, request, send_file, render_template, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
 from moviepy import ImageSequenceClip
-import os
-import numpy as np 
+import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
 
@@ -31,12 +30,16 @@ def generate_video():
     img = Image.open(image_file).convert("RGB")
     img = img.resize((224, 224))  # Resize to fit the model input size (if needed)
 
-    # Convert image to tensor and normalize it
-    img_array = np.array(img) / 255.0  # Normalize the image
-    img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)  # Add batch dimension and permute to [B, C, H, W]
+    # Convert image to numpy array, normalize, and then to tensor
+    img_array = np.array(img) / 255.0  # Normalize the image to [0, 1]
+    img_tensor = torch.tensor(img_array, dtype=torch.float32).unsqueeze(0).permute(0, 3, 1, 2)  # [B, C, H, W]
 
-    # Generate video from the image (num_frames is set to 6 in this example)
-    video_frames = pipe(img_tensor, num_frames=6).frames[0]
+    # Ensure model is running on the correct device (GPU/CPU)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    img_tensor = img_tensor.to(device)
+
+    # Generate video from the image
+    video_frames = pipe(init_image=img_tensor, num_frames=6).frames[0]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=7)
