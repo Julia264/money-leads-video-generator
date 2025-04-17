@@ -29,14 +29,17 @@ def generate_video():
     img = Image.open(image_file).convert("RGB")
     img = img.resize((384, 384))
 
-    # Convert the image to a numpy array
-    img_array = np.array(img)
+    # Convert the PIL image to a tensor (if needed)
+    img_tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+    img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
 
-    video_frames = pipe(img_array, num_frames=6).frames[0]
+    # Generate video
+    video_frames = pipe(img_tensor, num_frames=6).frames[0]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip = ImageSequenceClip(video_frames, fps=7)
         clip.write_videofile(temp.name, codec="libx264", audio=False)
         return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output.mp4")
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
