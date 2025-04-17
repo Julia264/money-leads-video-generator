@@ -42,7 +42,7 @@ def generate_video():
     video_frames = [np.array(frame) for frame in video_frames]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-        clip = ImageSequenceClip(video_frames, fps=7)
+        clip = ImageSequenceClip(video_frames, fps=30)
         clip.write_videofile(temp.name, codec="libx264", audio=False)
 
         # Send the generated video back to the client
