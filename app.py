@@ -14,7 +14,7 @@ CORS(app)
 # Load the pipeline once
 pipe = CogVideoXImageToVideoPipeline.from_pretrained(
     "THUDM/CogVideoX-5b-I2V",
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+    #torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
 )
 pipe.to(pipe.to("cpu")
        )
