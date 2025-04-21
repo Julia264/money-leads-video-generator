@@ -8,7 +8,7 @@ from moviepy import ImageSequenceClip, VideoFileClip
 from moviepy.video.fx import Resize
 import numpy as np
 
-app = Flask(__name__, static_url_path='/static')
+app = Flask(_name_, static_url_path='/static')
 CORS(app)
 
 # Load the pipeline once
@@ -47,16 +47,10 @@ def generate_video():
     clip = clip.with_duration(5)  # Set video duration to 5 seconds
     
     # Resize the clip for high resolution
-    from moviepy.video.fx.all import resize  # Import resize from all available effects
-
-    clip = resize(clip, width=1920, height=1080)  # Apply resizing to 1920x1080
-
+    clip = clip.fx(Resize.resize, width=1920, height=1080)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip.write_videofile(temp.name, codec="libx264", audio=False)
 
         # Send the generated video back to the client
         return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
