@@ -8,7 +8,7 @@ from moviepy import ImageSequenceClip, VideoFileClip
 from moviepy.video.fx import Resize
 import numpy as np
 
-app = Flask(_name_, static_url_path='/static')
+app = Flask(__name__, static_url_path='/static')
 CORS(app)
 
 # Load the pipeline once
@@ -55,5 +55,5 @@ def generate_video():
         # Send the generated video back to the client
         return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
