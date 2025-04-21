@@ -4,8 +4,8 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy import ImageSequenceClip, VideoFileClip
-from moviepy.video.fx import Resize
+from moviepy import ImageSequenceClip
+from moviepy.video.fx import resize
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
@@ -42,14 +42,17 @@ def generate_video():
     # Convert each frame to a numpy array if it's a PIL image
     video_frames = [np.array(frame) for frame in video_frames]
 
-    # Apply the Resize effect to upscale the video to 1920x1080
-    clip = ImageSequenceClip(video_frames, fps=30)
-    clip = clip.with_duration(5)  # Set video duration to 5 seconds
-    
-    # Resize the clip for high resolution
-    clip = clip.fx(Resize.resize, width=1920, height=1080)
-
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
+        # Create video clip from frames
+        clip = ImageSequenceClip(video_frames, fps=30)
+        
+        # Resize the video to 1920x1080
+        clip = resize.resize(clip, width=1920, height=1080)
+        
+        # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
+        clip = clip.set_duration(5)  # Set video duration to 5 seconds
+        
+        # Write the final video
         clip.write_videofile(temp.name, codec="libx264", audio=False)
 
         # Send the generated video back to the client
