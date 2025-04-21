@@ -5,7 +5,7 @@ from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
 from moviepy import ImageSequenceClip
-from moviepy.video.fx import resize
+from moviepy.video.fx import Resize
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
@@ -47,7 +47,8 @@ def generate_video():
         clip = ImageSequenceClip(video_frames, fps=30)
         
         # Resize the video to 1920x1080
-        clip = resize.resize(clip, width=1920, height=1080)
+        clip = Resize(clip, width=1920, height=1080)
+
         
         # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
         clip = clip.set_duration(5)  # Set video duration to 5 seconds
