@@ -47,7 +47,10 @@ def generate_video():
     clip = clip.with_duration(5)  # Set video duration to 5 seconds
     
     # Resize the clip for high resolution
-    clip = clip.fx(Resize.resize, width=1920, height=1080)
+    from moviepy.video.fx.all import resize  # Import resize from all available effects
+
+    clip = resize(clip, width=1920, height=1080)  # Apply resizing to 1920x1080
+
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         clip.write_videofile(temp.name, codec="libx264", audio=False)
