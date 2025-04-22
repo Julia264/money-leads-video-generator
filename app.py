@@ -8,7 +8,7 @@ from moviepy import ImageSequenceClip
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from transformers import AdamW
+from torch.optim import AdamW
 
 app = Flask(__name__, static_url_path='/static')
 CORS(app)
