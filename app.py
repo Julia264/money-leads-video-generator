@@ -63,7 +63,7 @@ def generate_video():
     )
 
     # Send the generated video back to the client
-    return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
+       return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
