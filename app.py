@@ -1,4 +1,4 @@
-\from flask import Flask, request, send_file, send_from_directory
+from flask import Flask, request, send_file, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
