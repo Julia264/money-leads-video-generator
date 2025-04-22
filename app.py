@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, send_from_directory
+\from flask import Flask, request, send_file, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
@@ -34,7 +34,7 @@ def generate_video():
     img_tensor = img_tensor.to(torch.float32)
 
     # Generate video frames
-    video_frames = pipe(img_tensor, num_frames=6).frames[0]
+    video_frames = pipe(img_tensor, num_frames=16).frames[0]
     video_frames = [np.array(frame) for frame in video_frames]
 
     # Create video clip
