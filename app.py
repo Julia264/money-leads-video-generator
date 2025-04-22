@@ -49,7 +49,7 @@ def generate_video():
     clip = clip.with_duration(5)  # Set video duration to 5 seconds
     
     # Resize the clip for high resolution
-    clip = resize(clip, (1920, 1080))
+    clip = Resize(clip, (1920, 1080))
 
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
