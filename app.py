@@ -5,7 +5,7 @@ from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
 from moviepy import ImageSequenceClip, VideoFileClip
-from moviepy.video.fx import Resize
+from moviepy.video.fx import resize
 #from moviepy.video.fx.resize import resize
 
 import numpy as np
@@ -49,7 +49,7 @@ def generate_video():
     clip = clip.with_duration(5)  # Set video duration to 5 seconds
     
     # Resize the clip for high resolution
-    clip = Resize(clip, (1920, 1080))
+    clip = resize(clip, (1920, 1080))
 
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
