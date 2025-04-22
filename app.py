@@ -48,7 +48,7 @@ def generate_video():
         clip.write_videofile(
             temp.name,
             codec="libx264",
-            bitrate="10000k",
+            bitrate="5000k",
             fps=30,
             preset="slow",
             audio=False
