@@ -5,7 +5,7 @@ from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
 from moviepy import ImageSequenceClip, VideoFileClip
-from moviepy.video.fx import resize
+from moviepy.video.fx.resize import resize
 #from moviepy.video.fx.resize import resize
 
 import numpy as np
