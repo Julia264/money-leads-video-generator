@@ -43,7 +43,7 @@ def generate_video():
 
     # Export video in high quality
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-        clip = clip.resize(height=1080, width=1920)  # upscale after generation
+        #clip = clip.resize(height=1080, width=1920)  # upscale after generation
         clip.write_videofile(
             temp.name,
             codec="libx264",
