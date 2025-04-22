@@ -9,7 +9,7 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torch.optim import AdamW
-
+import os
 app = Flask(__name__, static_url_path='/static')
 CORS(app)
 
