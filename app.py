@@ -42,21 +42,23 @@ def generate_video():
     clip = clip.with_duration(5)
 
     # Export video in high quality
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mov") as temp:
+    # Export video in high quality
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
         #clip = clip.resize(height=1080, width=1920)  # upscale after generation
         clip.write_videofile(
             temp.name,
-            codec="prores_ks",     # 🔥 High-quality Apple ProRes
+            codec="libx264",
             bitrate="10000k",
             fps=30,
+            preset="slow",
             audio=False
         )
 
         return send_file(
             temp.name,
-            mimetype="video/quicktime",  # MOV format
+            mimetype="video/mp4",
             as_attachment=True,
-            download_name="output_high_quality.mov"
+            download_name="output_with_motion.mp4"
         )
 
 if __name__ == "__main__":
