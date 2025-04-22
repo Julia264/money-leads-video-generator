@@ -46,18 +46,17 @@ def generate_video():
         #clip = clip.resize(height=1080, width=1920)  # upscale after generation
         clip.write_videofile(
             temp.name,
-            codec="libx264",
-            bitrate="5000k",
+            codec="prores_ks",     # 🔥 High-quality Apple ProRes
+            bitrate="10000k",
             fps=30,
-            preset="slow",
             audio=False
         )
 
         return send_file(
             temp.name,
-            mimetype="video/mp4",
+            mimetype="video/quicktime",  # MOV format
             as_attachment=True,
-            download_name="output_with_motion.mp4"
+            download_name="output_high_quality.mov"
         )
 
 if __name__ == "__main__":
