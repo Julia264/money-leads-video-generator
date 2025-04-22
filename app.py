@@ -34,7 +34,7 @@ def generate_video():
     img_tensor = img_tensor.to(torch.float32)
 
     # Generate video frames
-    video_frames = pipe(img_tensor, num_frames=16).frames[0]
+    video_frames = pipe(img_tensor, num_frames=8).frames[0]
     video_frames = [np.array(frame) for frame in video_frames]
 
     # Create video clip
