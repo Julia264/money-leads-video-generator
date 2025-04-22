@@ -4,10 +4,7 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy import ImageSequenceClip, VideoFileClip
-#from moviepy.video.fx.resize import resize
-#from moviepy.video.fx.resize import resize
-
+from moviepy.editor import ImageSequenceClip
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
@@ -29,41 +26,39 @@ def generate_video():
     # Get the uploaded image
     image_file = request.files["image"]
     img = Image.open(image_file).convert("RGB")
-    img = img.resize((224, 224), Image.LANCZOS)  # جودة أعلى من resize العادي
-  # Resize to fit the model input size (if needed)
+    img = img.resize((224, 224), Image.LANCZOS)
 
     # Convert image to tensor and normalize it
-    img_array = np.array(img) / 255.0  # Normalize the image
-    img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)  # Add batch dimension and permute to [B, C, H, W]
-    
-    # Ensure the tensor is of type float32
+    img_array = np.array(img) / 255.0
+    img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)
     img_tensor = img_tensor.to(torch.float32)
-    
-    # Generate video from the image (num_frames is set to 6 in this example)
-    video_frames = pipe(img_tensor, num_frames=6).frames[0]
 
-    # Convert each frame to a numpy array if it's a PIL image
+    # Generate video frames
+    video_frames = pipe(img_tensor, num_frames=6).frames[0]
     video_frames = [np.array(frame) for frame in video_frames]
 
-    # Apply the Resize effect to upscale the video to 1920x1080
+    # Create video clip
     clip = ImageSequenceClip(video_frames, fps=30)
-    clip = clip.with_duration(5)  # Set video duration to 5 seconds
-    
-    #Resize the clip for high resolution
-    #clip = clip.resize(height=1080, width=1920)
+    clip = clip.with_duration(5)
 
+    # Export video in high quality
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
+        clip = clip.resize(height=1080, width=1920)  # upscale after generation
+        clip.write_videofile(
+            temp.name,
+            codec="libx264",
+            bitrate="5000k",
+            fps=30,
+            preset="slow",
+            audio=False
+        )
 
-    clip.write_videofile(
-        temp.name,
-        codec="libx264",
-        bitrate="5000k",        # 👈 يعلي الجودة
-        fps=30,
-        preset="slow",          # 👈 جودة عالية
-        audio=False
-    )
-
-    # Send the generated video back to the client
-       return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
+        return send_file(
+            temp.name,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name="output_with_motion.mp4"
+        )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
