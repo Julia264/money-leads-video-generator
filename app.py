@@ -6,7 +6,8 @@ import torch
 import tempfile
 from moviepy import ImageSequenceClip, VideoFileClip
 from moviepy.video.fx import Resize
-from moviepy.video.fx.all import resize
+from moviepy.video.fx.resize import resize
+
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
