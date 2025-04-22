@@ -29,7 +29,7 @@ def generate_video():
     # Get the uploaded image
     image_file = request.files["image"]
     img = Image.open(image_file).convert("RGB")
-    img = img.resize((512, 512), Image.LANCZOS)  # جودة أعلى من resize العادي
+    img = img.resize((224, 224), Image.LANCZOS)  # جودة أعلى من resize العادي
   # Resize to fit the model input size (if needed)
 
     # Convert image to tensor and normalize it
@@ -53,12 +53,14 @@ def generate_video():
     #clip = clip.resize(height=1080, width=1920)
 
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-        clip.write_videofile(
-        "high_quality.mov",
-        codec="prores_ks",  # جودة احترافية
-        bitrate="10000k"
-)
+    clip.write_videofile(
+        temp.name,
+        codec="libx264",
+        bitrate="5000k",        # 👈 يعلي الجودة
+        fps=30,
+        preset="slow",          # 👈 جودة عالية
+        audio=False
+    )
 
         # Send the generated video back to the client
         return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
