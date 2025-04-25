@@ -75,6 +75,7 @@ def train_lora(data_dir, prompts, output_dir):
     print("✅ LoRA Fine-Tuning Complete")
 
 if __name__ == "__main__":
+    BASE_DIR = os.getcwd() 
     prompts = {
         "احبك": "a person saying 'I love you' with a warm smile",
         "احسنت": "a person saying 'Well done' with a thumbs up",
@@ -87,7 +88,9 @@ if __name__ == "__main__":
         "واو": "a person making a surprised 'Wow!' expression",
         "مدهش": "a person saying 'amazing' with wonder"
     }
+    data_dir = os.path.join(BASE_DIR, 'datasets', 'الحركات')
+    output_dir = os.path.join(BASE_DIR, 'models', 'fine-tuned-motion')
 
-    train_lora(data_dir=r"/home/ubuntu/money-leads-video-generator/svd-env/datasets/الحركات", prompts=prompts, output_dir=r"/home/ubuntu/money-leads-video-generator/models/fine-tuned-motion")
+    train_lora(data_dir=data_dir, prompts=prompts, output_dir=output_dir)
 
 
