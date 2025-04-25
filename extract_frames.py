@@ -3,8 +3,9 @@ import cv2
 import unicodedata
 import shutil
 
-VIDEO_DIR = r"D:\money_leads\Movements"
-OUTPUT_DIR = r"D:\money_leads\dataset"
+VIDEO_DIR = r"/home/ubuntu/money-leads-video-generator/svd-env/datasets/الحركات"
+OUTPUT_DIR = r"/home/ubuntu/money-leads-video-generator/svd-env/datasets/frames
+"
 
 def normalize_name(name):
     return unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii").replace(" ", "_")
