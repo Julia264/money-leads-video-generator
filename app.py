@@ -1,72 +1,42 @@
-from flask import Flask, request, send_file, send_from_directory
+# app.py
+from flask import Flask, request, send_file
 from flask_cors import CORS
+from diffusers import AnimateDiffPipeline
 from PIL import Image
-from diffusers import StableVideoDiffusionPipeline
 import torch
-import tempfile
-from moviepy import ImageSequenceClip
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from torch.optim import AdamW
-import os
-app = Flask(__name__, static_url_path='/static')
+from moviepy.editor import ImageSequenceClip
+import tempfile
+
+app = Flask(__name__)
 CORS(app)
 
-# Load the pipeline once
-pipe = StableVideoDiffusionPipeline.from_pretrained(
-    "stabilityai/stable-video-diffusion-img2vid",
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-)
-pipe.to("cuda" if torch.cuda.is_available() else "cpu")
+pipe = AnimateDiffPipeline.from_pretrained(
+    "./models/fine-tuned-motion",
+    torch_dtype=torch.float16
+).to("cuda" if torch.cuda.is_available() else "cpu")
 
-@app.route("/")
-def index():
-    return send_from_directory("static", "index.html")
+PROMPT_MAP = {
+    "clap": "a person clapping hands",
+    "wave": "a person waving",
+    "thumbs_up": "a person giving thumbs up"
+}
 
-@app.route("/generate-video", methods=["POST"])
-def generate_video():
-    # Get the uploaded image
-    image_file = request.files["image"]
-    img = Image.open(image_file).convert("RGB")
-    img = img.resize((224, 224), Image.LANCZOS)
+@app.route("/generate", methods=["POST"])
+def generate():
+    image = Image.open(request.files["image"]).convert("RGB")
+    action = request.form.get("action", "clap")
+    prompt = PROMPT_MAP.get(action, "a person clapping hands")
 
-    # Convert image to tensor and normalize it
-    img_array = np.array(img) / 255.0
-    img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)
-    img_tensor = img_tensor.to(torch.float32)
+    image = image.resize((512, 512))
+    frames = pipe(prompt=prompt, image=image, num_frames=16).frames[0]
+    frames = [np.array(f) for f in frames]
 
-    # Generate video frames
-    video_frames = pipe(img_tensor, num_frames=8).frames[0]
-    video_frames = [np.array(frame) for frame in video_frames]
+    clip = ImageSequenceClip(frames, fps=10)
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    clip.write_videofile(temp.name, codec="libx264", audio=False)
 
-    # Create video clip
-    clip = ImageSequenceClip(video_frames, fps=30)
-    clip = clip.with_duration(5)
-
-    # Export video in high quality
-    # Export video in high quality
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-        #clip = clip.resize(height=1080, width=1920)  # upscale after generation
-        clip.write_videofile(
-            temp.name,
-            codec="libx264",
-            bitrate="5000k",
-            fps=30,
-            preset="slow",
-            audio=False
-        )
-
-        return send_file(
-            temp.name,
-            mimetype="video/mp4",
-            as_attachment=True,
-            download_name="output_with_motion.mp4"
-        )
-@app.route("/fine-tune", methods=["POST"])
-def fine_tune():
-    fine_tune_model()
-    return "Model fine-tuning completed!"
+    return send_file(temp.name, as_attachment=True, download_name="generated.mp4")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
