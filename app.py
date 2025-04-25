@@ -22,6 +22,10 @@ PROMPT_MAP = {
     "thumbs_up": "a person giving thumbs up"
 }
 
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
 @app.route("/generate", methods=["POST"])
 def generate():
     image = Image.open(request.files["image"]).convert("RGB")
