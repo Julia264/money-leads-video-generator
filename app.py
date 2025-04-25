@@ -5,7 +5,7 @@ from diffusers import AnimateDiffPipeline
 from PIL import Image
 import torch
 import numpy as np
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 import tempfile
 
 app = Flask(__name__)
