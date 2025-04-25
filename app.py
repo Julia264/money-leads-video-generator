@@ -20,63 +20,6 @@ pipe = StableVideoDiffusionPipeline.from_pretrained(
 )
 pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
-# Custom dataset for video frames
-class VideoFramesDataset(Dataset):
-    def __init__(self, frame_dir, transform=None):
-        self.frame_dir = frame_dir
-        self.transform = transform
-        self.frames = []
-        for video_folder in os.listdir(frame_dir):
-            video_folder_path = os.path.join(frame_dir, video_folder)
-            if os.path.isdir(video_folder_path):
-                frames_in_video = [os.path.join(video_folder_path, f) for f in os.listdir(video_folder_path) if f.endswith(".png")]
-                self.frames.extend(frames_in_video)
-
-    def __len__(self):
-        return len(self.frames)
-
-    def __getitem__(self, idx):
-        img_name = self.frames[idx]
-        image = Image.open(img_name)
-        
-        if self.transform:
-            image = self.transform(image)
-        
-        return image
-
-# Define the transformations (resize, normalize, etc.)
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-])
-
-# Create dataset and dataloader
-frame_dir = "/home/ubuntu/money-leads-video-generator/svd-env/datasets/frames"
-dataset = VideoFramesDataset(frame_dir=frame_dir, transform=transform)
-dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=4)
-
-# Fine-tuning function
-def fine_tune_model():
-    optimizer = AdamW(pipe.parameters(), lr=1e-5)
-
-    epochs = 10
-    for epoch in range(epochs):
-        for i, batch in enumerate(dataloader):
-            optimizer.zero_grad()
-            outputs = pipe(batch)
-            
-            # Define loss calculation based on the specific task and model's forward output
-            loss = outputs.loss
-            loss.backward()
-            optimizer.step()
-
-            if i % 10 == 0:
-                print(f"Epoch {epoch+1}, Step {i}, Loss: {loss.item()}")
-
-    # Save the fine-tuned model
-    pipe.save_pretrained("path_to_save_model")
-
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
