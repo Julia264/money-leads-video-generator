@@ -7,12 +7,15 @@ import torch
 import numpy as np
 from moviepy import ImageSequenceClip
 import tempfile
+import os
 
 app = Flask(__name__)
 CORS(app)
 
+BASE_DIR = os.getcwd()
+
 pipe = AnimateDiffPipeline.from_pretrained(
-    "./models/fine-tuned-motion",
+    os.path.join(BASE_DIR, "models", "fine-tuned-motion"),
     torch_dtype=torch.float16
 ).to("cuda" if torch.cuda.is_available() else "cpu")
 
