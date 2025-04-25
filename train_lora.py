@@ -88,5 +88,6 @@ if __name__ == "__main__":
         "مدهش": "a person saying 'amazing' with wonder"
     }
 
-    train_lora(data_dir=r"D:\money_leads\dataset", prompts=prompts, output_dir=r"D:\money_leads\fine-tuned-motion")
+    train_lora(data_dir=r"D:\money_leads\dataset", prompts=prompts, output_dir=r"/home/ubuntu/money-leads-video-generator/models/fine-tuned-motion")
+
 
