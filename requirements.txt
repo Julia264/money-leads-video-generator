@@ -1,22 +1,20 @@
-flask==3.1.0
-flask_cors==5.0.1
-torch==2.6.0
-diffusers==0.33.1
-transformers==4.51.3
-moviepy==2.1.2
-imageio==2.37.0
-imageio_ffmpeg==0.6.0
-numpy==2.2.4
-pillow==10.4.0
-tqdm==4.67.1
-psutil==7.0.0
-requests==2.32.3
-python-dotenv==1.1.0
-fsspec==2025.3.2
-filelock==3.18.0
-proglog==0.1.11
-huggingface-hub==0.30.2
-accelerate 
-mpmath==1.3.0
-pyyaml==6.0.2
+# Core Libraries
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio
 
+# Model & Training
+transformers>=4.36.0
+diffusers>=0.25.0
+accelerate>=0.24.0
+peft>=0.7.1
+optree>=0.13.0
+
+# Image/Video Processing
+opencv-python
+Pillow
+moviepy
+
+# Flask API
+flask
+flask-cors
