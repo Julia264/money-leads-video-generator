@@ -37,10 +37,12 @@ def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
     # Load the base AnimateDiff model
-    pipe = AnimateDiffPipeline.from_single_file(
-        "./models/mm_sd_v15.ckpt",
-        torch_dtype=torch.float16
-    ).to(accelerator.device)
+pipe = AnimateDiffPipeline.from_pretrained(
+    pretrained_model_path="./models/mm_sd_v14.ckpt",
+    motion_module_path="./models/mm_sd_v15.ckpt",
+    torch_dtype=torch.float16
+).to(accelerator.device)
+
 
     # Apply LoRA to the UNet
     config = LoraConfig(
