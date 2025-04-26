@@ -1,12 +1,12 @@
 # train_lora.py
 import os
 import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from PIL import Image
 from diffusers import AnimateDiffPipeline
 from peft import get_peft_model, LoraConfig
-from torch.utils.data import Dataset, DataLoader
-from PIL import Image
-from transformers import CLIPTextModel, CLIPTokenizer
-from torchvision import transforms
+from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 
 class MotionFrameDataset(Dataset):
@@ -33,14 +33,23 @@ class MotionFrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
-    pipe = AnimateDiffPipeline.from_pretrained(
-        "ali-vilab/modelscope-damo-text-to-video", torch_dtype=torch.float16
+
+    # Load the base AnimateDiff model
+    pipe = AnimateDiffPipeline.from_single_file(
+        "./models/mm_sd_v14.ckpt",
+        torch_dtype=torch.float16
     ).to(accelerator.device)
 
-    config = LoraConfig(r=4, lora_alpha=16, lora_dropout=0.05, bias="none", task_type="UNET")
+    # Apply LoRA to the UNet
+    config = LoraConfig(
+        r=4,
+        lora_alpha=16,
+        lora_dropout=0.05,
+        bias="none",
+        task_type="UNET"
+    )
     pipe.unet = get_peft_model(pipe.unet, config)
     pipe.unet.train()
 
@@ -75,22 +84,20 @@ def train_lora(data_dir, prompts, output_dir):
     print("✅ LoRA Fine-Tuning Complete")
 
 if __name__ == "__main__":
-    BASE_DIR = os.getcwd() 
+    BASE_DIR = os.getcwd()
     prompts = {
-        "احبك": "a person saying 'I love you' with a warm smile",
-        "احسنت": "a person saying 'Well done' with a thumbs up",
-        "اعجبني": "a person showing approval with a head nod",
-        "انت عظيم": "a person saying 'You're amazing' enthusiastically",
-        "تصفيق": "a person clapping hands joyfully",
-        "حبيبي": "a person saying 'my dear' with affection",
-        "مرحبا": "a person waving and saying 'hello'",
-        "هذا رائع": "a person showing excitement and saying 'That’s great!'",
-        "واو": "a person making a surprised 'Wow!' expression",
-        "مدهش": "a person saying 'amazing' with wonder"
+        "احبك": "a person saying 'I love you' warmly",
+        "احسنت": "a person saying 'Well done' and smiling",
+        "اعجبني": "a person showing approval with a nod",
+        "انت عظيم": "a person cheering 'You're amazing'",
+        "تصفيق": "a person clapping joyfully",
+        "حبيبي": "a person saying 'my dear' affectionately",
+        "مرحبا": "a person waving hello",
+        "هذا رائع": "a person excited saying 'That’s great!'",
+        "واو": "a person amazed saying 'Wow!'",
+        "مدهش": "a person expressing 'amazing' happily"
     }
-    data_dir = os.path.join(BASE_DIR, 'datasets', 'الحركات')
-    output_dir = os.path.join(BASE_DIR, 'models', 'fine-tuned-motion')
+    data_dir = os.path.join(BASE_DIR, "datasets", "الحركات")
+    output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
-    train_lora(data_dir=data_dir, prompts=prompts, output_dir=output_dir)
-
-
+    train_lora(data_dir, prompts, output_dir)
