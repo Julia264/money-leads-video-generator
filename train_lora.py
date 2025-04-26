@@ -45,7 +45,7 @@ pipe = AnimateDiffPipeline.from_pretrained(
 
 
     # Apply LoRA to the UNet
-    config = LoraConfig(
+config = LoraConfig(
         r=4,
         lora_alpha=16,
         lora_dropout=0.05,
