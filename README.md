@@ -26,7 +26,7 @@ money-leads-video-generator/
 
 ---
 
-## 🛠️ Requirements
+##  Requirements
 
 Install the needed packages:
 
@@ -37,7 +37,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🚀 Full Steps to Run
+##  Full Steps to Run
 
 1. **Clone the repository and set up the environment**
 
@@ -76,7 +76,7 @@ python3 app.py
 
 ---
 
-## 📌 Notes
+##  Notes
 
 - **Frames Directory:** Make sure the `datasets/الحركات/` folder contains extracted frames before training.
 - **GPU Recommended:** Training and generation require a CUDA-compatible GPU for speed.
