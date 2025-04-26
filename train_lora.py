@@ -38,7 +38,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     # Load the base AnimateDiff model
     pipe = AnimateDiffPipeline.from_single_file(
-        "./models/mm_sd_v14.ckpt",
+        "./models/mm_sd_v15.ckpt",
         torch_dtype=torch.float16
     ).to(accelerator.device)
 
