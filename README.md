@@ -1,33 +1,28 @@
 
-# Money Leads Video Generator 🎥✨
+# Money Leads Video Generator 
 
-## 📂 Folder Structure
+## Folder Structure
 
 ```
 money-leads-video-generator/
 ├── app.py                # Flask web app for generating animated videos
 ├── extract_frames.py      # Script to extract frames from videos into folders
 ├── train_lora.py          # Script to train AnimateDiff model with LoRA fine-tuning
-├── datasets/              # Folder containing videos (and extracted frames)
-│   └── الحركات/             # Arabic-labeled folders with extracted frames
-├── models/                # Folder to save pre-trained models and fine-tuned models
-│   └── mm_sd_v14.ckpt      # Base model checkpoint
-│   └── mm_sd_v15.ckpt      # Motion module checkpoint
-├── static/                # Folder for frontend files (HTML, CSS if needed)
+├── static/                # Folder for frontend files (HTML, CSS )
 ```
 
 ---
 
-## ⚙️ How It Works
+##  How It Works
 
 - **Extract Frames:**  
-  - Run `extract_frames.py` to split each video into individual frame images.
+  - Run `extract_frames.py` to split each video into individual frame images based on the propmts.
 
 - **Train LoRA Model:**  
   - Run `train_lora.py` to fine-tune the AnimateDiff model using the extracted frames.
 
 - **Generate Videos:**  
-  - Use `app.py` to run a Flask web server where you upload an image and choose an action (like clap, wave, thumbs up) to generate a video.
+  - Use `app.py` to run a Flask web server where you upload an image and choose an action to generate a video.
 
 ---
 
@@ -38,19 +33,13 @@ Install the needed packages:
 ```bash
 pip install -r requirements.txt
 ```
-
-If you face tokenizers issues, run:
-
-```bash
-pip install --upgrade pip
-pip install tokenizers --prefer-binary
 ```
 
 ---
 
 ## 🚀 Full Steps to Run
 
-1. **Clone the repository and set up environment**
+1. **Clone the repository and set up the environment**
 
 ```bash
 git clone https://github.com/Julia264/money-leads-video-generator.git
@@ -95,6 +84,3 @@ python3 app.py
 
 ---
 
-## 👩‍💻 Author
-
-Developed by [Julia264](https://github.com/Julia264).
