@@ -1,51 +1,121 @@
+!pip install diffusers transformers accelerate peft bitsandbytes --upgrade
+
 import os
-import cv2
-import unicodedata
-import shutil
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from PIL import Image
+from diffusers import StableDiffusionPipeline
+from peft import get_peft_model, LoraConfig
+from transformers import CLIPTokenizer, CLIPTextModel
+from accelerate import Accelerator
 
+# Custom Dataset
+class FrameDataset(Dataset):
+    def __init__(self, root_dir, prompt_dict, image_size=512):
+        self.samples = []
+        for label in os.listdir(root_dir):
+            label_path = os.path.join(root_dir, label)
+            if os.path.isdir(label_path):
+                frames = [os.path.join(label_path, f) for f in os.listdir(label_path) if f.endswith(".png")]
+                for f in frames:
+                    self.samples.append((f, prompt_dict.get(label, "a photo of a person")))
 
+        self.transform = transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5]*3, [0.5]*3)
+        ])
 
-BASE_DIR = os.getcwd()  # دا بيجيب المسار الحالي تلقائياً
+    def __len__(self):
+        return len(self.samples)
 
-VIDEO_DIR = os.path.join(BASE_DIR, 'datasets', 'الحركات')
-OUTPUT_DIR = os.path.join(BASE_DIR, 'datasets', 'frames')
+    def __getitem__(self, idx):
+        path, prompt = self.samples[idx]
+        image = self.transform(Image.open(path).convert("RGB"))
+        return image, prompt
 
-def normalize_name(name):
-    return unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii").replace(" ", "_")
+# Training function
+def train_lora(data_dir, prompts, output_dir):
+    accelerator = Accelerator()
+    
+    model_id = "CompVis/stable-diffusion-v1-5"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # Load base model
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_id,
+        torch_dtype=torch.float16,
+        revision="fp16",
+    ).to(accelerator.device)
 
-for video_file in os.listdir(VIDEO_DIR):
-    if video_file.endswith(".mp4") or video_file.endswith(".mov"):
-        label = os.path.splitext(video_file)[0]
-        label_safe = normalize_name(label)
-        label_folder = os.path.join(OUTPUT_DIR, label_safe)
-        os.makedirs(label_folder, exist_ok=True)
+    # Apply LoRA
+    config = LoraConfig(
+        r=8,
+        lora_alpha=16,
+        target_modules=["attn1", "attn2", "proj_in", "proj_out"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM"  # Suitable for diffusion-based UNet blocks
+    )
+    pipe.unet = get_peft_model(pipe.unet, config)
+    pipe.unet.train()
 
-        video_path = os.path.join(VIDEO_DIR, video_file)
-        cap = cv2.VideoCapture(video_path)
+    tokenizer = CLIPTokenizer.from_pretrained(model_id, subfolder="tokenizer")
+    text_encoder = CLIPTextModel.from_pretrained(model_id, subfolder="text_encoder").to(accelerator.device)
 
-        if not cap.isOpened():
-            print(f"❌ Failed to open video: {video_path}")
-            continue
+    dataset = FrameDataset(data_dir, prompts)
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=2)
 
-        frame_count = 0
-        while True:
-            success, frame = cap.read()
-            if not success:
-                break
-            frame_filename = os.path.join(label_folder, f"frame_{frame_count:03d}.png")
-            cv2.imwrite(frame_filename, frame)
-            frame_count += 1
+    optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=1e-4)
 
-        cap.release()
+    for epoch in range(3):
+        for step, (images, captions) in enumerate(dataloader):
+            with accelerator.accumulate(pipe.unet):
+                input_ids = tokenizer(captions, padding="max_length", truncation=True, max_length=77, return_tensors="pt").input_ids.to(accelerator.device)
+                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
 
-        # Optionally rename the folder back to Arabic
-        arabic_path = os.path.join(OUTPUT_DIR, label)
-        if label_safe != label:
-            try:
-                shutil.move(label_folder, arabic_path)
-            except:
-                pass
+                noise = torch.randn_like(images)
+                timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
 
-        print(f"✅ {video_file} → {frame_count} frames extracted to dataset/{label}")
+                noisy_images = images + 0.1 * noise
+
+                model_pred = pipe.unet(
+                    noisy_images,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
+
+                loss = torch.nn.functional.mse_loss(model_pred, noise)
+
+                accelerator.backward(loss)
+                optimizer.step()
+                optimizer.zero_grad()
+
+            if step % 10 == 0:
+                print(f"Epoch {epoch+1} Step {step}: Loss = {loss.item():.4f}")
+
+    accelerator.wait_for_everyone()
+    pipe.save_pretrained(output_dir)
+    print("✅ LoRA training complete and model saved!")
+
+# Main block
+if __name__ == "__main__":
+    BASE_DIR = os.getcwd()
+
+    prompts = {
+        "احبك": "a person saying I love you",
+        "احسنت": "a person saying Well done happily",
+        "اعجبني": "a person showing like gesture",
+        "انت عظيم": "a person excited shouting You're amazing",
+        "تصفيق": "a person clapping hands",
+        "حبيبي": "a person saying my dear with love",
+        "مرحبا": "a person waving hand",
+        "هذا رائع": "a person saying That's great with excitement",
+        "واو": "a person amazed saying Wow",
+        "مدهش": "a person surprised saying Amazing"
+    }
+
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")
+    output_dir = os.path.join(BASE_DIR, "lora_finetuned_model")
+
+    train_lora(data_dir, prompts, output_dir)
