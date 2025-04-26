@@ -37,7 +37,7 @@ class MotionFrameDataset(Dataset):
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     pipe = AnimateDiffPipeline.from_pretrained(
-        "guoyww/animatediff-motion-lora", torch_dtype=torch.float16
+        "cerspense/zeroscope_v2_XL", torch_dtype=torch.float16
     ).to(accelerator.device)
 
     config = LoraConfig(r=4, lora_alpha=16, lora_dropout=0.05, bias="none", task_type="UNET")
