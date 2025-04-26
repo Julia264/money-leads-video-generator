@@ -36,10 +36,11 @@ class MotionFrameDataset(Dataset):
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
-    pipe = AnimateDiffPipeline.from_single_file(
-    "/home/ubuntu/animatediff/mm_sd_v15.ckpt",
+    pipe = AnimateDiffPipeline.from_pretrained(
+    "./animatediff",
     torch_dtype=torch.float16
     ).to(accelerator.device)
+
 
 
 
