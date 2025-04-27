@@ -50,7 +50,8 @@ def train_lora(data_dir, prompts, output_dir):
     ).to(accelerator.device)
 
     ### Inject LoRA layers manually ✨
-    inject_trainable_lora(pipe.unet, r=4, lora_alpha=16)
+    inject_trainable_lora(pipe.unet, r=4, lora_scale=16)
+
 
     pipe.unet.train()
 
