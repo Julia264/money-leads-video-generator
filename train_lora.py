@@ -1,13 +1,14 @@
-# train_lora.py
+# train_lora.py 
+
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
-from peft import get_peft_model, LoraConfig
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
+from lora_diffusion import inject_trainable_lora
 
 class MotionFrameDataset(Dataset):
     def __init__(self, root_dir, prompt_dict, image_size=256):
@@ -37,7 +38,7 @@ def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
     controlnet = ControlNetModel.from_pretrained(
-        "lllyasviel/control_v11p_sd15_openpose",  # ControlNet Small
+        "lllyasviel/control_v11p_sd15_openpose",
         torch_dtype=torch.float16
     ).to(accelerator.device)
 
@@ -48,15 +49,9 @@ def train_lora(data_dir, prompts, output_dir):
         safety_checker=None
     ).to(accelerator.device)
 
-    # Apply LoRA
-    config = LoraConfig(
-        r=4,
-        lora_alpha=16,
-        lora_dropout=0.05,
-        bias="none",
-        task_type="UNET"
-    )
-    pipe.unet = get_peft_model(pipe.unet, config)
+    ### Inject LoRA layers manually ✨
+    inject_trainable_lora(pipe.unet, r=4, lora_alpha=16)
+
     pipe.unet.train()
 
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
@@ -67,7 +62,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=5e-6)
 
-    for epoch in range(3):  # ممكن تزود عدد ال epochs بعدين
+    for epoch in range(3):
         for i, (images, texts) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
@@ -95,11 +90,11 @@ if __name__ == "__main__":
         "احبك": "a person saying 'I love you' warmly",
         "احسنت": "a person saying 'Well done' and smiling",
         "اعجبني": "a person showing approval with a nod",
-        "انت عظيم": "a person cheering 'You're amazing'!",
+        "انت عظيم": "a person cheering 'You're amazing!'",
         "تصفيق": "a person clapping joyfully",
         "حبيبي": "a person saying 'my dear' affectionately",
         "مرحبا": "a person waving hello",
-        "هذا رائع": "a person saying 'that's wonderful'",
+        "هذا رائع": "a person excited saying 'that's wonderful'",
         "واو": "a person amazed saying 'Wow!'",
         "مدهش": "a person expressing amazement"
     }
