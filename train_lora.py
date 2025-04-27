@@ -10,7 +10,7 @@ from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 
 class MotionFrameDataset(Dataset):
-    def __init__(self, root_dir, prompt_dict, image_size=512):
+    def __init__(self, root_dir, prompt_dict, image_size=256):
         self.samples = []
         for label in os.listdir(root_dir):
             label_path = os.path.join(root_dir, label)
@@ -36,11 +36,16 @@ class MotionFrameDataset(Dataset):
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
-    # Load lightweight model
+    # Load lightweight model (v1-4 instead of v2-1)
     pipe = StableDiffusionPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-2-1-base",
-        torch_dtype=torch.float16
-    ).to(accelerator.device)
+        "CompVis/stable-diffusion-v1-4"
+    )
+
+    pipe.unet = pipe.unet.half()
+    pipe.vae = pipe.vae.half()
+    pipe.text_encoder = pipe.text_encoder.half()
+
+    pipe = pipe.to(accelerator.device)
 
     # Apply LoRA to the UNet
     config = LoraConfig(
@@ -54,7 +59,7 @@ def train_lora(data_dir, prompts, output_dir):
     pipe.unet.train()
 
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").half().to(accelerator.device)
 
     dataset = MotionFrameDataset(data_dir, prompts)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)  # Batch size = 1
