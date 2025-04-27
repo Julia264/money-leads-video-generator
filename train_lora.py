@@ -34,9 +34,9 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Inject LoRA into UNet
-def inject_lora(unet, r=4, lora_alpha=16):
-    unet.set_attn_processor(LoRAAttnProcessor(r=r, lora_alpha=lora_alpha))
+# 🟡 Correct inject_lora (FOR YOUR CASE)
+def inject_lora(unet):
+    unet.set_attn_processor(LoRAAttnProcessor())
 
 # 🔵 Training function
 def train_lora(data_dir, prompts, output_dir):
