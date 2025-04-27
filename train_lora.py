@@ -4,9 +4,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-from diffusers import DiffusionPipeline
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
 from peft import get_peft_model, LoraConfig
-from transformers import CLIPTokenizer, CLIPTextModel, BitsAndBytesConfig
+from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 
 class MotionFrameDataset(Dataset):
@@ -36,22 +36,19 @@ class MotionFrameDataset(Dataset):
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
-    # Config for 4bit loading
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16
-    )
-
-    pipe = DiffusionPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-2-1-base",
-        torch_dtype=torch.float16,
-        quantization_config=bnb_config,
-        variant="fp16",
+    controlnet = ControlNetModel.from_pretrained(
+        "lllyasviel/control_v11p_sd15_openpose",  # ControlNet Small
+        torch_dtype=torch.float16
     ).to(accelerator.device)
 
-    # Apply LoRA to the UNet
+    pipe = StableDiffusionControlNetPipeline.from_pretrained(
+        "runwayml/stable-diffusion-v1-5",
+        controlnet=controlnet,
+        torch_dtype=torch.float16,
+        safety_checker=None
+    ).to(accelerator.device)
+
+    # Apply LoRA
     config = LoraConfig(
         r=4,
         lora_alpha=16,
@@ -63,14 +60,14 @@ def train_lora(data_dir, prompts, output_dir):
     pipe.unet.train()
 
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14", torch_dtype=torch.float16).to(accelerator.device)
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
 
     dataset = MotionFrameDataset(data_dir, prompts)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=2)
 
-    optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=1e-5)
+    optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=5e-6)
 
-    for epoch in range(5):
+    for epoch in range(3):  # ممكن تزود عدد ال epochs بعدين
         for i, (images, texts) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
@@ -78,7 +75,7 @@ def train_lora(data_dir, prompts, output_dir):
 
                 noise = torch.randn_like(images)
                 noisy = images + 0.1 * noise
-                outputs = pipe.unet(noisy, timestep=torch.tensor([1], device=images.device), encoder_hidden_states=encoder_hidden_states)
+                outputs = pipe.unet(noisy, encoder_hidden_states=encoder_hidden_states)
 
                 loss = torch.nn.functional.mse_loss(outputs.sample, images)
                 accelerator.backward(loss)
@@ -98,15 +95,15 @@ if __name__ == "__main__":
         "احبك": "a person saying 'I love you' warmly",
         "احسنت": "a person saying 'Well done' and smiling",
         "اعجبني": "a person showing approval with a nod",
-        "انت عظيم": "a person cheering 'You're amazing'",
+        "انت عظيم": "a person cheering 'You're amazing'!",
         "تصفيق": "a person clapping joyfully",
         "حبيبي": "a person saying 'my dear' affectionately",
         "مرحبا": "a person waving hello",
-        "هذا رائع": "a person excited saying 'That’s great!'",
+        "هذا رائع": "a person saying 'that's wonderful'",
         "واو": "a person amazed saying 'Wow!'",
-        "مدهش": "a person expressing 'amazing' happily"
+        "مدهش": "a person expressing amazement"
     }
-    data_dir = os.path.join(BASE_DIR, "datasets", "الحركات")
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
