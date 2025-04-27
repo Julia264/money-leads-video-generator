@@ -8,6 +8,8 @@ from diffusers import AnimateDiffPipeline
 from peft import get_peft_model, LoraConfig
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
+from diffusers import DiffusionPipeline
+
 
 class MotionFrameDataset(Dataset):
     def __init__(self, root_dir, prompt_dict, image_size=512):
@@ -36,10 +38,12 @@ class MotionFrameDataset(Dataset):
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
-    pipe = AnimateDiffPipeline.from_single_file(
-    "./animatediff/mm_sd_v15.ckpt",
+
+    pipe = DiffusionPipeline.from_pretrained(
+    "cerspense/zeroscope_v2_XL",    # موديل جاهز للفيديو
     torch_dtype=torch.float16
-   ).to(accelerator.device)
+    ).to(accelerator.device)
+
 
 
 
