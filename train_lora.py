@@ -72,7 +72,9 @@ def train_lora(data_dir, prompts, output_dir):
 
                 noise = torch.randn_like(images)
                 noisy = images + 0.1 * noise
-                outputs = pipe.unet(noisy, encoder_hidden_states=encoder_hidden_states)
+                timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
+                outputs = pipe.unet(noisy, timesteps, encoder_hidden_states=encoder_hidden_states)
+
 
                 loss = torch.nn.functional.mse_loss(outputs.sample, images)
                 accelerator.backward(loss)
