@@ -15,7 +15,6 @@ class MotionFrameDataset(Dataset):
         self.samples = []
         for label in os.listdir(root_dir):
             label_path = os.path.join(root_dir, label)
-
             if os.path.isdir(label_path):
                 frames = [os.path.join(label_path, f) for f in os.listdir(label_path) if f.endswith(".png")]
                 for f in frames:
@@ -74,7 +73,7 @@ def train_lora(data_dir, prompts, output_dir):
                     images = torch.cat([images, alpha], dim=1)
 
                 input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids)[0]
+                encoder_hidden_states = text_encoder(input_ids)[0].half()  # ✅ Convert encoder_hidden_states to half
 
                 noise = torch.randn_like(images)
                 noisy = images + 0.1 * noise
