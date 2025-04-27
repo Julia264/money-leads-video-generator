@@ -1,4 +1,4 @@
-# train_lora.py 
+# train_lora.py
 
 import os
 import torch
@@ -15,6 +15,7 @@ class MotionFrameDataset(Dataset):
         self.samples = []
         for label in os.listdir(root_dir):
             label_path = os.path.join(root_dir, label)
+
             if os.path.isdir(label_path):
                 frames = [os.path.join(label_path, f) for f in os.listdir(label_path) if f.endswith(".png")]
                 for f in frames:
@@ -49,7 +50,7 @@ def train_lora(data_dir, prompts, output_dir):
         safety_checker=None
     ).to(accelerator.device)
 
-    # Inject LoRA layers manually
+    # Inject LoRA layers manually ✨
     inject_trainable_lora(pipe.unet, r=4, target_replace_module=["CrossAttention", "Attention", "GEGLU"])
 
     pipe.unet.train()
@@ -65,9 +66,15 @@ def train_lora(data_dir, prompts, output_dir):
     for epoch in range(5):
         for i, (images, texts) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
-                images = images.to(accelerator.device).half()  # ✅ لازم الصور تبقى half
+                images = images.to(accelerator.device).half()
+
+                # ✅ Add alpha channel if needed
+                if images.shape[1] == 3:
+                    alpha = torch.ones((images.shape[0], 1, images.shape[2], images.shape[3]), device=images.device).half()
+                    images = torch.cat([images, alpha], dim=1)
+
                 input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids)[0].half()  # ✅ كمان ال encoder outputs
+                encoder_hidden_states = text_encoder(input_ids)[0]
 
                 noise = torch.randn_like(images)
                 noisy = images + 0.1 * noise
