@@ -41,7 +41,7 @@ def train_lora(data_dir, prompts, output_dir):
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
-        revision="fp16",
+        
     ).to(accelerator.device)
 
     # Apply LoRA
