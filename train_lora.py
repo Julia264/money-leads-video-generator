@@ -15,6 +15,7 @@ class MotionFrameDataset(Dataset):
         self.samples = []
         for label in os.listdir(root_dir):
             label_path = os.path.join(root_dir, label)
+            
             if os.path.isdir(label_path):
                 frames = [os.path.join(label_path, f) for f in os.listdir(label_path) if f.endswith(".png")]
                 for f in frames:
@@ -64,7 +65,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=5e-6)
 
-    for epoch in range(5):
+ for epoch in range(5):
     for i, (images, texts) in enumerate(dataloader):
         with accelerator.accumulate(pipe.unet):
             images = images.to(accelerator.device)  # ✅ اضف دي هنا
