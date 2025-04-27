@@ -1,36 +1,28 @@
-# train_lora.py
-
 import os
-import gc
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
+from diffusers import StableDiffusionPipeline
+from peft import get_peft_model, LoraConfig
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
-from lora_diffusion import inject_trainable_lora
 
-# ---- دالة تفريغ الذاكرة قبل بدء التدريب ----
-gc.collect()
-torch.cuda.empty_cache()
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
-# ---- Dataset لتحميل الإطارات ----
-class MotionFrameDataset(Dataset):
-    def __init__(self, root_dir, prompt_dict, image_size=256):
+# Custom Dataset
+class FrameDataset(Dataset):
+    def __init__(self, root_dir, prompt_dict, image_size=512):
         self.samples = []
         for label in os.listdir(root_dir):
             label_path = os.path.join(root_dir, label)
             if os.path.isdir(label_path):
                 frames = [os.path.join(label_path, f) for f in os.listdir(label_path) if f.endswith(".png")]
                 for f in frames:
-                    self.samples.append((f, prompt_dict.get(label, "a person moving")))
+                    self.samples.append((f, prompt_dict.get(label, "a photo of a person")))
 
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
-            transforms.Normalize([0.5] * 3, [0.5] * 3)
+            transforms.Normalize([0.5]*3, [0.5]*3)
         ])
 
     def __len__(self):
@@ -41,79 +33,86 @@ class MotionFrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# ---- دالة التدريب ----
+# Training function
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
-    controlnet = ControlNetModel.from_pretrained(
-        "lllyasviel/control_v11p_sd15_openpose",
-        torch_dtype=torch.float16
-    ).to(accelerator.device)
-
-    pipe = StableDiffusionControlNetPipeline.from_pretrained(
+    # Load Stable Diffusion 1.5
+    pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
-        controlnet=controlnet,
         torch_dtype=torch.float16,
-        safety_checker=None
+        revision="fp16",
     ).to(accelerator.device)
 
-    inject_trainable_lora(pipe.unet, r=4, target_replace_module=["CrossAttention", "Attention", "GEGLU"])
-
+    # Apply LoRA
+    config = LoraConfig(
+        r=4,
+        lora_alpha=16,
+        target_modules=["attn1", "attn2"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="UNET"
+    )
+    pipe.unet = get_peft_model(pipe.unet, config)
     pipe.unet.train()
 
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
 
-    dataset = MotionFrameDataset(data_dir, prompts)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
+    dataset = FrameDataset(data_dir, prompts)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=2)
 
-    optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=5e-6)
+    optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=1e-4)
 
-    for epoch in range(5):
-        for i, (images, texts) in enumerate(dataloader):
+    for epoch in range(3):
+        for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
-                images = images.to(accelerator.device, dtype=torch.float16)
+                images = images.to(accelerator.device)
 
-                if images.shape[1] == 3:
-                    alpha = torch.ones((images.shape[0], 1, images.shape[2], images.shape[3]), device=images.device, dtype=torch.float16)
-                    images = torch.cat([images, alpha], dim=1)
-
-                input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids)[0].half()
+                input_ids = tokenizer(captions, padding="max_length", truncation=True, max_length=77, return_tensors="pt").input_ids.to(accelerator.device)
+                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
 
                 noise = torch.randn_like(images)
-                noisy = images + 0.1 * noise
+                noisy_images = images + 0.1 * noise
+
                 timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
 
-                outputs = pipe.unet(noisy, timesteps, encoder_hidden_states=encoder_hidden_states)
+                model_pred = pipe.unet(
+                    noisy_images,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
 
-                loss = torch.nn.functional.mse_loss(outputs.sample, images)
+                loss = torch.nn.functional.mse_loss(model_pred, noise)
+
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
 
-            if i % 10 == 0:
-                print(f"[Epoch {epoch+1}] Step {i}: Loss = {loss.item():.4f}")
+            if step % 10 == 0:
+                print(f"Epoch {epoch+1} Step {step}: Loss = {loss.item():.4f}")
 
     accelerator.wait_for_everyone()
     pipe.save_pretrained(output_dir)
-    print("✅ LoRA Fine-Tuning Complete")
+    print("✅ LoRA training complete and model saved!")
 
-# ---- Main ----
+# Main block
 if __name__ == "__main__":
     BASE_DIR = os.getcwd()
+
     prompts = {
-        "احبك": "a person saying 'I love you' warmly",
-        "احسنت": "a person saying 'Well done' and smiling",
-        "اعجبني": "a person showing approval with a nod",
-        "انت عظيم": "a person cheering 'You're amazing!'",
-        "تصفيق": "a person clapping joyfully",
-        "حبيبي": "a person saying 'my dear' affectionately",
-        "مرحبا": "a person waving hello",
-        "هذا رائع": "a person excited saying 'that's wonderful'",
-        "واو": "a person amazed saying 'Wow!'",
-        "مدهش": "a person expressing amazement"
+        "احبك": "a person saying I love you",
+        "احسنت": "a person saying Well done happily",
+        "اعجبني": "a person showing like gesture",
+        "انت عظيم": "a person excited shouting You're amazing",
+        "تصفيق": "a person clapping hands",
+        "حبيبي": "a person saying my dear with love",
+        "مرحبا": "a person waving hand",
+        "هذا رائع": "a person saying That's great with excitement",
+        "واو": "a person amazed saying Wow",
+        "مدهش": "a person surprised saying Amazing"
     }
+
     data_dir = os.path.join(BASE_DIR, "datasets", "frames")
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
