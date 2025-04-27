@@ -1,4 +1,4 @@
-# train_lora.py
+# train_lora.py 
 
 import os
 import torch
@@ -49,7 +49,7 @@ def train_lora(data_dir, prompts, output_dir):
         safety_checker=None
     ).to(accelerator.device)
 
-    # Inject LoRA layers
+    # Inject LoRA layers manually
     inject_trainable_lora(pipe.unet, r=4, target_replace_module=["CrossAttention", "Attention", "GEGLU"])
 
     pipe.unet.train()
@@ -65,10 +65,9 @@ def train_lora(data_dir, prompts, output_dir):
     for epoch in range(5):
         for i, (images, texts) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
-                images = images.to(accelerator.device)  # ✅ Important
-
+                images = images.to(accelerator.device).half()  # ✅ لازم الصور تبقى half
                 input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids)[0]
+                encoder_hidden_states = text_encoder(input_ids)[0].half()  # ✅ كمان ال encoder outputs
 
                 noise = torch.randn_like(images)
                 noisy = images + 0.1 * noise
