@@ -4,12 +4,10 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-from diffusers import AnimateDiffPipeline
+from diffusers import StableDiffusionPipeline
 from peft import get_peft_model, LoraConfig
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
-from diffusers import DiffusionPipeline
-
 
 class MotionFrameDataset(Dataset):
     def __init__(self, root_dir, prompt_dict, image_size=512):
@@ -38,17 +36,11 @@ class MotionFrameDataset(Dataset):
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
-
-    pipe = DiffusionPipeline.from_pretrained(
-    "cerspense/zeroscope_v2_XL",    # موديل جاهز للفيديو
-    torch_dtype=torch.float16
+    # Load lightweight model
+    pipe = StableDiffusionPipeline.from_pretrained(
+        "stabilityai/stable-diffusion-2-1-base",
+        torch_dtype=torch.float16
     ).to(accelerator.device)
-
-
-
-
-
-
 
     # Apply LoRA to the UNet
     config = LoraConfig(
@@ -65,7 +57,7 @@ def train_lora(data_dir, prompts, output_dir):
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
 
     dataset = MotionFrameDataset(data_dir, prompts)
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=2)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)  # Batch size = 1
 
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=1e-5)
 
@@ -77,7 +69,7 @@ def train_lora(data_dir, prompts, output_dir):
 
                 noise = torch.randn_like(images)
                 noisy = images + 0.1 * noise
-                outputs = pipe.unet(noisy, encoder_hidden_states=encoder_hidden_states)
+                outputs = pipe.unet(noisy, timestep=torch.tensor([1], device=images.device), encoder_hidden_states=encoder_hidden_states)
 
                 loss = torch.nn.functional.mse_loss(outputs.sample, images)
                 accelerator.backward(loss)
