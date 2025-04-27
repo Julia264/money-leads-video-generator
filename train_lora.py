@@ -1,4 +1,4 @@
-# train_lora.py 
+# train_lora.py
 
 import os
 import torch
@@ -15,7 +15,6 @@ class MotionFrameDataset(Dataset):
         self.samples = []
         for label in os.listdir(root_dir):
             label_path = os.path.join(root_dir, label)
-            
             if os.path.isdir(label_path):
                 frames = [os.path.join(label_path, f) for f in os.listdir(label_path) if f.endswith(".png")]
                 for f in frames:
@@ -50,10 +49,8 @@ def train_lora(data_dir, prompts, output_dir):
         safety_checker=None
     ).to(accelerator.device)
 
-    ### Inject LoRA layers manually ✨
+    # Inject LoRA layers
     inject_trainable_lora(pipe.unet, r=4, target_replace_module=["CrossAttention", "Attention", "GEGLU"])
-
-
 
     pipe.unet.train()
 
@@ -65,28 +62,27 @@ def train_lora(data_dir, prompts, output_dir):
 
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=5e-6)
 
- for epoch in range(5):
-    for i, (images, texts) in enumerate(dataloader):
-        with accelerator.accumulate(pipe.unet):
-            images = images.to(accelerator.device)  # ✅ اضف دي هنا
+    for epoch in range(5):
+        for i, (images, texts) in enumerate(dataloader):
+            with accelerator.accumulate(pipe.unet):
+                images = images.to(accelerator.device)  # ✅ Important
 
-            input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
-            encoder_hidden_states = text_encoder(input_ids)[0]
+                input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
+                encoder_hidden_states = text_encoder(input_ids)[0]
 
-            noise = torch.randn_like(images)
-            noisy = images + 0.1 * noise
-            timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
+                noise = torch.randn_like(images)
+                noisy = images + 0.1 * noise
+                timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
 
-            outputs = pipe.unet(noisy, timesteps, encoder_hidden_states=encoder_hidden_states)
+                outputs = pipe.unet(noisy, timesteps, encoder_hidden_states=encoder_hidden_states)
 
-            loss = torch.nn.functional.mse_loss(outputs.sample, images)
-            accelerator.backward(loss)
-            optimizer.step()
-            optimizer.zero_grad()
+                loss = torch.nn.functional.mse_loss(outputs.sample, images)
+                accelerator.backward(loss)
+                optimizer.step()
+                optimizer.zero_grad()
 
-        if i % 10 == 0:
-            print(f"[Epoch {epoch+1}] Step {i}: Loss = {loss.item():.4f}")
-
+            if i % 10 == 0:
+                print(f"[Epoch {epoch+1}] Step {i}: Loss = {loss.item():.4f}")
 
     accelerator.wait_for_everyone()
     pipe.save_pretrained(output_dir)
