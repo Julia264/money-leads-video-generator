@@ -4,12 +4,12 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 from diffusers import StableDiffusionPipeline
-from diffusers.models.attention_processor import LoRAAttnProcessor, AttnProcessor
+from diffusers.models.attention_processor import LoRAAttnProcessor
 from diffusers.training_utils import set_seed
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 
-# 🟢 Custom dataset for frames
+# 🟢 Custom dataset
 class FrameDataset(Dataset):
     def __init__(self, root_dir, prompt_dict, image_size=512):
         self.samples = []
@@ -34,22 +34,16 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Function to inject LoRA into attention layers
+# 🟡 Inject LoRA into UNet
 def inject_lora(unet, r=4, lora_alpha=16):
-    lora_attn_procs = {}
-
-    for name, module in unet.named_modules():
-        if isinstance(module, AttnProcessor):
-            lora_attn_procs[name] = LoRAAttnProcessor(hidden_size=module.hidden_size, r=r, lora_alpha=lora_alpha)
-
-    unet.set_attn_processor(lora_attn_procs)
+    unet.set_attn_processor(LoRAAttnProcessor(r=r, lora_alpha=lora_alpha))
 
 # 🔵 Training function
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     set_seed(42)
 
-    # Load base Stable Diffusion model
+    # Load Stable Diffusion model
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
@@ -58,10 +52,10 @@ def train_lora(data_dir, prompts, output_dir):
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
 
-    # Inject LoRA into the UNet
+    # Inject LoRA into UNet
     inject_lora(pipe.unet)
 
-    # Load dataset
+    # Dataset and dataloader
     dataset = FrameDataset(data_dir, prompts)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
 
@@ -94,9 +88,9 @@ def train_lora(data_dir, prompts, output_dir):
 
     accelerator.wait_for_everyone()
     pipe.save_pretrained(output_dir)
-    print("✅ Training complete! Model saved to:", output_dir)
+    print("✅ Training complete! Model saved at:", output_dir)
 
-# 🔥 Main code
+# 🔥 Main function
 if __name__ == "__main__":
     BASE_DIR = os.getcwd()
 
@@ -104,13 +98,13 @@ if __name__ == "__main__":
         "احبك": "a person saying I love you",
         "احسنت": "a person saying Well done happily",
         "اعجبني": "a person showing approval with a head nod",
-        "انت عظيم": "a person saying You're amazing excitedly",
+        "انت عظيم": "a person excitedly saying You're amazing",
         "تصفيق": "a person clapping hands joyfully",
         "حبيبي": "a person saying my dear warmly",
-        "مرحبا": "a person waving and greeting",
-        "هذا رائع": "a person saying That's great with a smile",
+        "مرحبا": "a person waving hello",
+        "هذا رائع": "a person saying That's great with excitement",
         "واو": "a person making a surprised Wow expression",
-        "مدهش": "a person saying Amazing while smiling"
+        "مدهش": "a person amazed saying Amazing!"
     }
 
     data_dir = os.path.join(BASE_DIR, "dataset")
