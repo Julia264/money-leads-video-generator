@@ -4,9 +4,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-from diffusers import StableDiffusionPipeline
+from diffusers import DiffusionPipeline
 from peft import get_peft_model, LoraConfig
-from transformers import CLIPTokenizer, CLIPTextModel
+from transformers import CLIPTokenizer, CLIPTextModel, BitsAndBytesConfig
 from accelerate import Accelerator
 
 class MotionFrameDataset(Dataset):
@@ -36,16 +36,20 @@ class MotionFrameDataset(Dataset):
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
-    # Load lightweight model (v1-4 instead of v2-1)
-    pipe = StableDiffusionPipeline.from_pretrained(
-        "CompVis/stable-diffusion-v1-4"
+    # Config for 4bit loading
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16
     )
 
-    pipe.unet = pipe.unet.half()
-    pipe.vae = pipe.vae.half()
-    pipe.text_encoder = pipe.text_encoder.half()
-
-    pipe = pipe.to(accelerator.device)
+    pipe = DiffusionPipeline.from_pretrained(
+        "stabilityai/stable-diffusion-2-1-base",
+        torch_dtype=torch.float16,
+        quantization_config=bnb_config,
+        variant="fp16",
+    ).to(accelerator.device)
 
     # Apply LoRA to the UNet
     config = LoraConfig(
@@ -59,10 +63,10 @@ def train_lora(data_dir, prompts, output_dir):
     pipe.unet.train()
 
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").half().to(accelerator.device)
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14", torch_dtype=torch.float16).to(accelerator.device)
 
     dataset = MotionFrameDataset(data_dir, prompts)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)  # Batch size = 1
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
 
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=1e-5)
 
