@@ -1,6 +1,7 @@
 # train_lora.py
 
 import os
+import gc
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -10,6 +11,12 @@ from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 from lora_diffusion import inject_trainable_lora
 
+# ---- دالة تفريغ الذاكرة قبل بدء التدريب ----
+gc.collect()
+torch.cuda.empty_cache()
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+# ---- Dataset لتحميل الإطارات ----
 class MotionFrameDataset(Dataset):
     def __init__(self, root_dir, prompt_dict, image_size=256):
         self.samples = []
@@ -23,7 +30,7 @@ class MotionFrameDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
-            transforms.Normalize([0.5]*3, [0.5]*3)
+            transforms.Normalize([0.5] * 3, [0.5] * 3)
         ])
 
     def __len__(self):
@@ -34,6 +41,7 @@ class MotionFrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
+# ---- دالة التدريب ----
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
 
@@ -49,7 +57,6 @@ def train_lora(data_dir, prompts, output_dir):
         safety_checker=None
     ).to(accelerator.device)
 
-    # Inject LoRA layers manually ✨
     inject_trainable_lora(pipe.unet, r=4, target_replace_module=["CrossAttention", "Attention", "GEGLU"])
 
     pipe.unet.train()
@@ -58,22 +65,21 @@ def train_lora(data_dir, prompts, output_dir):
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
 
     dataset = MotionFrameDataset(data_dir, prompts)
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=2)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
 
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=5e-6)
 
     for epoch in range(5):
         for i, (images, texts) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
-                images = images.to(accelerator.device).half()
+                images = images.to(accelerator.device, dtype=torch.float16)
 
-                # ✅ Add alpha channel if needed
                 if images.shape[1] == 3:
-                    alpha = torch.ones((images.shape[0], 1, images.shape[2], images.shape[3]), device=images.device).half()
+                    alpha = torch.ones((images.shape[0], 1, images.shape[2], images.shape[3]), device=images.device, dtype=torch.float16)
                     images = torch.cat([images, alpha], dim=1)
 
                 input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids)[0].half()  # ✅ Convert encoder_hidden_states to half
+                encoder_hidden_states = text_encoder(input_ids)[0].half()
 
                 noise = torch.randn_like(images)
                 noisy = images + 0.1 * noise
@@ -93,6 +99,7 @@ def train_lora(data_dir, prompts, output_dir):
     pipe.save_pretrained(output_dir)
     print("✅ LoRA Fine-Tuning Complete")
 
+# ---- Main ----
 if __name__ == "__main__":
     BASE_DIR = os.getcwd()
     prompts = {
