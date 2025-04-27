@@ -64,25 +64,28 @@ def train_lora(data_dir, prompts, output_dir):
 
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=5e-6)
 
-    for epoch in range(3):
-        for i, (images, texts) in enumerate(dataloader):
-            with accelerator.accumulate(pipe.unet):
-                input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids)[0]
+    for epoch in range(5):
+    for i, (images, texts) in enumerate(dataloader):
+        with accelerator.accumulate(pipe.unet):
+            images = images.to(accelerator.device)  # ✅ اضف دي هنا
 
-                noise = torch.randn_like(images)
-                noisy = images + 0.1 * noise
-                timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
-                outputs = pipe.unet(noisy, timesteps, encoder_hidden_states=encoder_hidden_states)
+            input_ids = tokenizer(list(texts), padding="max_length", truncation=True, return_tensors="pt").input_ids.to(accelerator.device)
+            encoder_hidden_states = text_encoder(input_ids)[0]
 
+            noise = torch.randn_like(images)
+            noisy = images + 0.1 * noise
+            timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
 
-                loss = torch.nn.functional.mse_loss(outputs.sample, images)
-                accelerator.backward(loss)
-                optimizer.step()
-                optimizer.zero_grad()
+            outputs = pipe.unet(noisy, timesteps, encoder_hidden_states=encoder_hidden_states)
 
-            if i % 10 == 0:
-                print(f"[Epoch {epoch+1}] Step {i}: Loss = {loss.item():.4f}")
+            loss = torch.nn.functional.mse_loss(outputs.sample, images)
+            accelerator.backward(loss)
+            optimizer.step()
+            optimizer.zero_grad()
+
+        if i % 10 == 0:
+            print(f"[Epoch {epoch+1}] Step {i}: Loss = {loss.item():.4f}")
+
 
     accelerator.wait_for_everyone()
     pipe.save_pretrained(output_dir)
