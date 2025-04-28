@@ -89,7 +89,7 @@ def train_lora(zip_path, output_dir):
     """Train LoRA model on the two-action dataset"""
     # Initialize accelerator
     accelerator = Accelerator(
-        mixed_precision='fp16',
+        #mixed_precision='fp16',
         gradient_accumulation_steps=1,
         log_with="tensorboard",
         project_dir=os.path.join(output_dir, "logs")
