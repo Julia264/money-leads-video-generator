@@ -121,7 +121,7 @@ def train_lora(zip_path, output_dir):
     # Load text components
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
-    text_encoder = text_encoder.to(dtype=torch.float16)
+    #text_encoder = text_encoder.to(dtype=torch.float16)
 
     # Inject LoRA
     logger.info("Injecting LoRA layers...")
@@ -187,7 +187,7 @@ def train_lora(zip_path, output_dir):
                 continue
 
             images, captions = batch
-            images = images.to(accelerator.device, dtype=torch.float16)
+            images = images.to(accelerator.device)
 
             with torch.no_grad():
                 # Encode images to latents
@@ -260,7 +260,7 @@ def train_lora(zip_path, output_dir):
                     continue
                     
                 images, captions = batch
-                images = images.to(accelerator.device, dtype=torch.float16)
+                images = images.to(accelerator.device)
                 
                 # Encode images and text
                 latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
