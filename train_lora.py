@@ -4,7 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 from diffusers import StableDiffusionPipeline
-from diffusers.models.attention_processor import LoRAAttnProcessor
+from diffusers.models.attention_processor import LoRAAttnProcessor2_0
 from diffusers.training_utils import set_seed
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
@@ -34,9 +34,19 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Inject LoRA Correctly
-def inject_lora(unet):
-    unet.set_attn_processor(LoRAAttnProcessor())
+# 🟡 Inject LoRA Correctly using LoRAAttnProcessor2_0
+def inject_lora(unet, r=4, lora_alpha=1):
+    lora_attn_procs = {}
+    for name, module in unet.attn_processors.items():
+        if module is None:
+            continue
+        lora_attn_procs[name] = LoRAAttnProcessor2_0(
+            hidden_size=module.hidden_size,
+            cross_attention_dim=module.cross_attention_dim,
+            rank=r,
+            lora_alpha=lora_alpha,
+        )
+    unet.set_attn_processor(lora_attn_procs)
 
 # 🔵 Training Function
 def train_lora(data_dir, prompts, output_dir):
@@ -62,7 +72,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 يمكنك تعديل عدد الـ Epochs حسب قوة جهازك
+    for epoch in range(3):  # 🔥 يمكنك تعديل عدد الـ Epochs حسب الرغبة
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 images = images.to(accelerator.device, dtype=torch.float16)
@@ -111,7 +121,7 @@ if __name__ == "__main__":
         "مدهش": "a person amazed saying Amazing!"
     }
 
-    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ لو مسار الفريمات مختلف عدله هنا
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ مسار مجلد الفريمات
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
