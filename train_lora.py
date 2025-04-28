@@ -42,8 +42,8 @@ class TwoActionDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
-   def __getitem__(self, idx):
-    file_name, prompt = self.samples[idx]
+    def __getitem__(self, idx):
+      file_name, prompt = self.samples[idx]
     try:
         with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
             with zip_ref.open(file_name) as pt_data:
