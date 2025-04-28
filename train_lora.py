@@ -41,17 +41,22 @@ def inject_lora(unet, r=4):
         r=r,
         target_replace_module=["CrossAttention", "Attention"],
     )
-    # 🛠 مهم: نلف على كل الموديولات ونحولها لـ float16
-    for name, module in unet.named_modules():
-        if hasattr(module, "to"):
-            module.to(dtype=torch.float16)
+
+    # 🛠 Important: forcibly convert everything to float16 after injection
+    def recursively_cast(module, dtype=torch.float16):
+        for child in module.children():
+            recursively_cast(child, dtype)
+        if hasattr(module, 'weight') and module.weight is not None:
+            module.to(dtype)
+
+    recursively_cast(unet)
 
 # 🔵 Training Function
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     set_seed(42)
 
-    # Load Stable Diffusion model
+    # Load Stable Diffusion pipeline
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
