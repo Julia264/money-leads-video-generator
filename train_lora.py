@@ -42,40 +42,50 @@ class TwoActionDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx):
-        file_name, prompt = self.samples[idx]
-        try:
-            with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
-                with zip_ref.open(file_name) as pt_data:
-                    # Load tensor
-                    tensor = torch.load(pt_data, map_location="cpu")
-                    
-                    if tensor.dim() == 2:
-                        tensor = tensor.unsqueeze(0).repeat(3, 1, 1)  # Expand grayscale to 3 channels
-                    elif tensor.shape[0] != 3:
-                        raise ValueError(f"Unexpected tensor shape: {tensor.shape}")
-                    
-                    # Normalize manually [-1, 1] because no PIL transform
-                    tensor = (tensor - 0.5) / 0.5
+   def __getitem__(self, idx):
+    file_name, prompt = self.samples[idx]
+    try:
+        with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
+            with zip_ref.open(file_name) as pt_data:
+                # Load tensor
+                tensor = torch.load(pt_data, map_location="cpu")
+                
+                # Check tensor shape
+                if tensor.dim() == 2:
+                    tensor = tensor.unsqueeze(0).repeat(3, 1, 1)
+                elif tensor.shape[0] != 3:
+                    logger.warning(f"Unexpected tensor shape: {tensor.shape}")
+                    return None, None
+                
+                # Check if tensor is all zeros
+                if torch.all(tensor == 0):
+                    logger.warning(f"Tensor is all zeros: {file_name}")
+                    return None, None
 
-            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
-                logger.warning("Invalid tensor values detected")
-                return None, None
+                # Check for NaNs or Infs
+                if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                    logger.warning(f"Tensor has NaN or Inf: {file_name}")
+                    return None, None
 
-            return tensor.half(), prompt
+                # Safe normalization to [-1, 1]
+                tensor = (tensor / 255.0) * 2.0 - 1.0
+                tensor = torch.clamp(tensor, -1.0, 1.0)
 
-        except Exception as e:
-            logger.warning(f"Error loading tensor: {str(e)}")
-            return None, None
+        return tensor.half(), prompt
+
+    except Exception as e:
+        logger.warning(f"Error loading tensor: {str(e)}")
+        return None, None
 
 
 def safe_collate(batch):
-    """Collate function that filters out None samples"""
     batch = [item for item in batch if item[0] is not None]
     if len(batch) == 0:
+        logger.warning("All samples in this batch were invalid. Skipping batch.")
         return None, None
     images, prompts = zip(*batch)
     return torch.stack(images), list(prompts)
+
 
 def inject_lora(unet, r=4):
     """Inject LoRA layers into UNet"""
