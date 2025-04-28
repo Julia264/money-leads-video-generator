@@ -4,12 +4,12 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 from diffusers import StableDiffusionPipeline
-from diffusers.training_utils import set_seed
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 from lora_diffusion import inject_trainable_lora
+from diffusers.training_utils import set_seed
 
-# 🟢 Dataset Class
+# 🟡 Dataset
 class FrameDataset(Dataset):
     def __init__(self, root_dir, prompt_dict, image_size=512):
         self.samples = []
@@ -34,15 +34,15 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Inject LoRA
+# 🟢 LoRA Injection
 def inject_lora(unet, r=4):
+    unet.half()
     inject_trainable_lora(
         unet,
         r=r,
         target_replace_module=["CrossAttention", "Attention"],
     )
 
-    # 🛠 Important: forcibly convert everything to float16 after injection
     def recursively_cast(module, dtype=torch.float16):
         for child in module.children():
             recursively_cast(child, dtype)
@@ -51,12 +51,11 @@ def inject_lora(unet, r=4):
 
     recursively_cast(unet)
 
-# 🔵 Training Function
+# 🔵 Training
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     set_seed(42)
 
-    # Load Stable Diffusion pipeline
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
@@ -67,7 +66,6 @@ def train_lora(data_dir, prompts, output_dir):
 
     inject_lora(pipe.unet)
 
-    # Load dataset
     dataset = FrameDataset(data_dir, prompts)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
 
@@ -75,12 +73,11 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 عدد epochs حسب رغبتك
+    for epoch in range(3):
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 images = images.to(accelerator.device, dtype=torch.float16)
 
-                # Encode images into latents
                 with torch.no_grad():
                     latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
 
@@ -107,24 +104,24 @@ def train_lora(data_dir, prompts, output_dir):
     pipe.save_pretrained(output_dir)
     print("✅ Training complete! Model saved at:", output_dir)
 
-# 🔥 Main Execution
+# 🔥 Main
 if __name__ == "__main__":
     BASE_DIR = os.getcwd()
 
     prompts = {
         "احبك": "a person saying I love you",
         "احسنت": "a person saying Well done happily",
-        "اعجبني": "a person showing approval with a head nod",
-        "انت عظيم": "a person excitedly saying You're amazing",
-        "تصفيق": "a person clapping hands joyfully",
+        "اعجبني": "a person showing approval",
+        "انت عظيم": "a person saying You are great",
+        "تصفيق": "a person clapping",
         "حبيبي": "a person saying my dear warmly",
         "مرحبا": "a person waving hello",
-        "هذا رائع": "a person saying That's great with excitement",
-        "واو": "a person making a surprised Wow expression",
-        "مدهش": "a person amazed saying Amazing!"
+        "هذا رائع": "a person saying This is wonderful",
+        "واو": "a person saying Wow!",
+        "مدهش": "a person looking amazed"
     }
 
-    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # ✔️ تأكد إن frames موجودة هنا
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
