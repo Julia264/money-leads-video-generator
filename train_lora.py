@@ -36,73 +36,95 @@ class FrameDataset(Dataset):
 
 # 🟢 LoRA Injection
 def inject_lora(unet, r=4):
-    unet.half()
     inject_trainable_lora(
         unet,
         r=r,
         target_replace_module=["CrossAttention", "Attention"],
     )
 
-    def recursively_cast(module, dtype=torch.float16):
-        for child in module.children():
-            recursively_cast(child, dtype)
-        if hasattr(module, 'weight') and module.weight is not None:
-            module.to(dtype)
-
-    recursively_cast(unet)
-
 # 🔵 Training
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     set_seed(42)
 
+    # Load pipeline with float16 precision
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
     ).to(accelerator.device)
 
+    # Load text encoder and tokenizer
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
+    text_encoder = text_encoder.to(dtype=torch.float16)  # Match UNet dtype
 
+    # Inject LoRA layers
     inject_lora(pipe.unet)
 
+    # Prepare dataset and dataloader
     dataset = FrameDataset(data_dir, prompts)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
 
+    # Optimizer
     optimizer = torch.optim.Adam(pipe.unet.parameters(), lr=1e-4)
+
+    # Prepare with accelerator
+    pipe.unet, optimizer, dataloader = accelerator.prepare(
+        pipe.unet, optimizer, dataloader
+    )
 
     pipe.unet.train()
 
     for epoch in range(3):
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
+                # Move images to device and ensure float16
                 images = images.to(accelerator.device, dtype=torch.float16)
 
                 with torch.no_grad():
+                    # Encode images to latents
                     latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
 
-                input_ids = tokenizer(captions, padding="max_length", truncation=True, max_length=77, return_tensors="pt").input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
+                # Encode text
+                input_ids = tokenizer(
+                    captions, 
+                    padding="max_length", 
+                    truncation=True, 
+                    max_length=77, 
+                    return_tensors="pt"
+                ).input_ids.to(accelerator.device)
+                
+                with torch.no_grad():
+                    encoder_hidden_states = text_encoder(input_ids.to(text_encoder.device)).last_hidden_state
 
+                # Add noise
                 noise = torch.randn_like(latents)
                 timesteps = torch.randint(0, 1000, (latents.shape[0],), device=latents.device).long()
-
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
-                model_pred = pipe.unet(noisy_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
+                # Predict noise
+                model_pred = pipe.unet(
+                    noisy_latents, 
+                    timesteps, 
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
 
+                # Calculate loss
                 loss = torch.nn.functional.mse_loss(model_pred, noise)
 
+                # Backpropagate
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
 
             if step % 10 == 0:
-                print(f"Epoch {epoch+1} Step {step}: Loss = {loss.item():.4f}")
+                accelerator.print(f"Epoch {epoch+1} Step {step}: Loss = {loss.item():.4f}")
 
+    # Save model
     accelerator.wait_for_everyone()
-    pipe.save_pretrained(output_dir)
-    print("✅ Training complete! Model saved at:", output_dir)
+    if accelerator.is_main_process:
+        pipe.save_pretrained(output_dir)
+        print("✅ Training complete! Model saved at:", output_dir)
 
 # 🔥 Main
 if __name__ == "__main__":
