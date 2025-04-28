@@ -1,90 +1,108 @@
 import os
 import torch
+import zipfile
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from PIL import Image
 from diffusers import StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 from lora_diffusion import inject_trainable_lora
 from diffusers.training_utils import set_seed
 import logging
+from PIL import Image
 
-# 📋 Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# 🟡 Dataset with improved error handling
-class FrameDataset(Dataset):
-    def __init__(self, root_dir, prompt_dict, image_size=512):
-        self.samples = []
-        for label in os.listdir(root_dir):
-            label_path = os.path.join(root_dir, label)
-            if os.path.isdir(label_path):
-                frames = [os.path.join(label_path, f) for f in os.listdir(label_path) 
-                         if f.endswith((".png", ".jpg", ".jpeg"))]
-                for f in frames:
-                    self.samples.append((f, prompt_dict.get(label, "a person")))
+class TwoActionDataset(Dataset):
+    def __init__(self, zip_path, image_size=512):
+        """
+        Dataset class for the two actions (clapping, waving) from Dataset2.zip
         
+        Args:
+            zip_path: Path to Dataset2.zip
+            image_size: Target image size
+        """
+        self.samples = []
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.5]*3, [0.5]*3)
         ])
+        
+        # Extract frames directly from zip without saving to disk
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # Get list of files in zip
+            file_list = zip_ref.namelist()
+            
+            # Process clapping frames
+            clapping_files = [f for f in file_list if 'clapping' in f.lower() and f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            for img_file in clapping_files:
+                with zip_ref.open(img_file) as img_data:
+                    self.samples.append((img_data, "a person clapping hands"))
+            
+            # Process waving frames
+            waving_files = [f for f in file_list if 'waving' in f.lower() and f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            for img_file in waving_files:
+                with zip_ref.open(img_file) as img_data:
+                    self.samples.append((img_data, "a person waving hello"))
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        path, prompt = self.samples[idx]
+        img_data, prompt = self.samples[idx]
         try:
-            image = Image.open(path).convert("RGB")
+            # Load image directly from zip data
+            image = Image.open(img_data).convert('RGB')
             image = self.transform(image)
-            # Validate image tensor
+            
+            # Validate tensor
             if torch.isnan(image).any() or torch.isinf(image).any():
-                logger.warning(f"Invalid pixel values in {path}")
+                logger.warning("Invalid tensor values detected")
                 return None, None
+                
             return image, prompt
         except Exception as e:
-            logger.warning(f"Error loading image {path}: {str(e)}")
+            logger.warning(f"Error loading image: {str(e)}")
             return None, None
 
-# ⚙️ Safe collate_fn
-def collate_fn(batch):
+def safe_collate(batch):
+    """Collate function that filters out None samples"""
     batch = [item for item in batch if item[0] is not None]
-    if not batch:
+    if len(batch) == 0:
         return None, None
     images, prompts = zip(*batch)
-    images = torch.stack(images)
-    # Double-check for NaN/Inf before returning
-    if torch.isnan(images).any() or torch.isinf(images).any():
-        return None, None
-    return images, list(prompts)
+    return torch.stack(images), list(prompts)
 
-# 🛠️ LoRA Injection with lower rank
-def inject_lora(unet, r=2):  # Reduced rank for stability
+def inject_lora(unet, r=4):
+    """Inject LoRA layers into UNet"""
     inject_trainable_lora(
         unet,
         r=r,
         target_replace_module=["CrossAttention", "Attention"],
     )
 
-# 🔵 Training with NaN protection
-def train_lora(data_dir, prompts, output_dir):
-    # Initialize accelerator with gradient accumulation
+def train_lora(zip_path, output_dir):
+    """Train LoRA model on the two-action dataset"""
+    # Initialize accelerator
     accelerator = Accelerator(
-        gradient_accumulation_steps=2,
-        mixed_precision='fp16'
+        mixed_precision='fp16',
+        gradient_accumulation_steps=1,
+        log_with="tensorboard",
+        project_dir=os.path.join(output_dir, "logs")
     )
     set_seed(42)
-
-    # Enable memory efficient attention if available
+    
+    # Enable memory efficient attention
     if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
         torch.backends.cuda.enable_flash_sdp(True)
     if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
         torch.backends.cuda.enable_mem_efficient_sdp(True)
 
-    # Load pipeline with more stable settings
+    # Load pipeline
+    logger.info("Loading Stable Diffusion pipeline...")
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
@@ -92,7 +110,7 @@ def train_lora(data_dir, prompts, output_dir):
         requires_safety_checker=False,
     ).to(accelerator.device)
     
-    # Use DDPM scheduler for more stable training
+    # Use DDPM scheduler
     pipe.scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
 
     # Freeze all components except LoRA
@@ -105,24 +123,39 @@ def train_lora(data_dir, prompts, output_dir):
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
     text_encoder = text_encoder.to(dtype=torch.float16)
 
-    # Inject LoRA with lower rank
+    # Inject LoRA
+    logger.info("Injecting LoRA layers...")
     inject_lora(pipe.unet)
 
-    # Prepare dataset with validation
-    dataset = FrameDataset(data_dir, prompts)
-    dataloader = DataLoader(
-        dataset,
-        batch_size=1,
+    # Prepare dataset and dataloader
+    logger.info("Preparing dataset...")
+    dataset = TwoActionDataset(zip_path)
+    
+    # Create train/test split (80/20)
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+    
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=2,
         shuffle=True,
         num_workers=2,
-        collate_fn=collate_fn,
-        persistent_workers=True
+        collate_fn=safe_collate
+    )
+    
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=1,
+        collate_fn=safe_collate
     )
 
-    # Conservative optimizer settings
+    # Optimizer
     optimizer = torch.optim.AdamW(
         pipe.unet.parameters(),
-        lr=1e-5,  # Reduced learning rate
+        lr=1e-4,
         betas=(0.9, 0.999),
         weight_decay=1e-2,
         eps=1e-8
@@ -131,37 +164,35 @@ def train_lora(data_dir, prompts, output_dir):
     # Learning rate scheduler
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, 
-        T_max=len(dataloader)*3,
-        eta_min=1e-6
+        T_max=len(train_dataloader)*5,  # 5 epochs
+        eta_min=1e-5
     )
-
-    # Gradient scaler for mixed precision
-    scaler = torch.cuda.amp.GradScaler()
 
     # Prepare with accelerator
-    pipe.unet, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        pipe.unet, optimizer, dataloader, lr_scheduler
+    pipe.unet, optimizer, train_dataloader, test_dataloader, lr_scheduler = accelerator.prepare(
+        pipe.unet, optimizer, train_dataloader, test_dataloader, lr_scheduler
     )
 
-    # Training loop with NaN checks
-    pipe.unet.train()
-    for epoch in range(3):
-        for step, batch in enumerate(dataloader):
+    # Training loop
+    num_epochs = 5
+    best_loss = float('inf')
+    
+    logger.info("Starting training...")
+    for epoch in range(num_epochs):
+        pipe.unet.train()
+        total_loss = 0
+        
+        for step, batch in enumerate(train_dataloader):
             if batch is None or batch[0] is None:
                 continue
 
             images, captions = batch
-            
-            with accelerator.accumulate(pipe.unet):
-                images = images.to(accelerator.device, dtype=torch.float16)
+            images = images.to(accelerator.device, dtype=torch.float16)
 
-                # Encode images to latents with validation
-                with torch.no_grad():
-                    latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
-                    if torch.isnan(latents).any():
-                        logger.warning("NaN detected in latents, skipping batch")
-                        continue
-
+            with torch.no_grad():
+                # Encode images to latents
+                latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
+                
                 # Encode text
                 input_ids = tokenizer(
                     captions,
@@ -170,94 +201,125 @@ def train_lora(data_dir, prompts, output_dir):
                     max_length=77,
                     return_tensors="pt"
                 ).input_ids.to(accelerator.device)
+                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
 
-                with torch.no_grad():
-                    encoder_hidden_states = text_encoder(input_ids).last_hidden_state
-                    if torch.isnan(encoder_hidden_states).any():
-                        logger.warning("NaN detected in text embeddings, skipping batch")
-                        continue
+            # Add noise
+            noise = torch.randn_like(latents)
+            timesteps = torch.randint(
+                0, pipe.scheduler.config.num_train_timesteps, 
+                (latents.shape[0],), 
+                device=latents.device
+            ).long()
+            noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
+            # Predict noise
+            with accelerator.autocast():
+                model_pred = pipe.unet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
+
+                # Calculate loss
+                loss = torch.nn.functional.mse_loss(
+                    model_pred.float(), 
+                    noise.float(), 
+                    reduction="mean"
+                )
+
+            # Skip NaN losses
+            if torch.isnan(loss).any() or torch.isinf(loss).any():
+                logger.warning(f"Invalid loss at step {step}, skipping")
+                optimizer.zero_grad()
+                continue
+
+            # Backprop
+            accelerator.backward(loss)
+            if accelerator.sync_gradients:
+                accelerator.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+            lr_scheduler.step()
+            
+            total_loss += loss.item()
+            
+            # Log progress
+            if step % 10 == 0:
+                logger.info(
+                    f"Epoch {epoch+1}/{num_epochs} | "
+                    f"Step {step}/{len(train_dataloader)} | "
+                    f"Loss: {loss.item():.4f}"
+                )
+
+        # Validation
+        pipe.unet.eval()
+        test_loss = 0
+        with torch.no_grad():
+            for batch in test_dataloader:
+                if batch is None or batch[0] is None:
+                    continue
+                    
+                images, captions = batch
+                images = images.to(accelerator.device, dtype=torch.float16)
+                
+                # Encode images and text
+                latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
+                input_ids = tokenizer(
+                    captions,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=77,
+                    return_tensors="pt"
+                ).input_ids.to(accelerator.device)
+                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
+                
                 # Add noise
                 noise = torch.randn_like(latents)
                 timesteps = torch.randint(
-                    0, pipe.scheduler.config.num_train_timesteps, 
-                    (latents.shape[0],), 
+                    0, pipe.scheduler.config.num_train_timesteps,
+                    (latents.shape[0],),
                     device=latents.device
                 ).long()
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
-
-                # Mixed precision training with gradient scaling
-                with accelerator.autocast():
-                    model_pred = pipe.unet(
-                        noisy_latents,
-                        timesteps,
-                        encoder_hidden_states=encoder_hidden_states
-                    ).sample
-
-                    # Calculate loss in float32 for stability
-                    loss = torch.nn.functional.mse_loss(
-                        model_pred.float(), 
-                        noise.float(), 
-                        reduction="mean"
-                    )
-
-                # Check for NaN before backprop
-                if torch.isnan(loss).any() or torch.isinf(loss).any():
-                    logger.warning(f"NaN/Inf loss detected at step {step}, skipping")
-                    optimizer.zero_grad()
-                    continue
-
-                # Backprop with gradient scaling
-                scaler.scale(loss).backward()
                 
-                # Gradient clipping
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+                # Predict and calculate loss
+                model_pred = pipe.unet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
+                loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
+                test_loss += loss.item()
 
-                # Optimizer step
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad()
-                lr_scheduler.step()
+        avg_test_loss = test_loss / len(test_dataloader)
+        logger.info(f"Epoch {epoch+1} Test Loss: {avg_test_loss:.4f}")
+        
+        # Save best model
+        if avg_test_loss < best_loss:
+            best_loss = avg_test_loss
+            if accelerator.is_main_process:
+                save_path = os.path.join(output_dir, "best_model")
+                pipe.save_pretrained(save_path)
+                logger.info(f"Saved best model with test loss: {best_loss:.4f}")
 
-            # Logging
-            if step % 10 == 0:
-                lr = lr_scheduler.get_last_lr()[0]
-                accelerator.print(
-                    f"Epoch {epoch+1} Step {step}: "
-                    f"Loss = {loss.item():.4f}, "
-                    f"LR = {lr:.2e}"
-                )
-
-    # Save model
+    # Final save
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        pipe.save_pretrained(output_dir)
-        logger.info(f"✅ Training complete! Model saved at: {output_dir}")
+        final_save_path = os.path.join(output_dir, "final_model")
+        pipe.save_pretrained(final_save_path)
+        logger.info(f"Training complete! Model saved at: {final_save_path}")
 
-# 🚀 Main
 if __name__ == "__main__":
-    BASE_DIR = os.getcwd()
-
-    prompts = {
-        "احبك": "a person saying I love you",
-        "احسنت": "a person saying Well done happily",
-        "اعجبني": "a person showing approval",
-        "انت عظيم": "a person saying You are great",
-        "تصفيق": "a person clapping",
-        "حبيبي": "a person saying my dear warmly",
-        "مرحبا": "a person waving hello",
-        "هذا رائع": "a person saying This is wonderful",
-        "واو": "a person saying Wow!",
-        "مدهش": "a person looking amazed"
-    }
-
-    data_dir = os.path.join(BASE_DIR, "datasets", "frames")
-    output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
-
-    if not os.path.exists(data_dir):
-        raise FileNotFoundError(f"Data directory not found: {data_dir}")
-
+    # Paths
+    zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"  # Update this path
+    output_dir = "/home/ubuntu/money-leads-video-generator/models"  # Update this path
+    
+    # Create output directory
     os.makedirs(output_dir, exist_ok=True)
-
-    train_lora(data_dir, prompts, output_dir)
+    
+    # Verify zip file exists
+    if not os.path.exists(zip_path):
+        raise FileNotFoundError(f"Dataset zip file not found at {zip_path}")
+    
+    # Start training
+    train_lora(zip_path, output_dir)
