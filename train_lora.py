@@ -156,7 +156,7 @@ def train_lora(zip_path, output_dir):
     # Optimizer
     optimizer = torch.optim.AdamW(
         pipe.unet.parameters(),
-        lr=1e-4,
+        lr=5e-5,
         betas=(0.9, 0.999),
         weight_decay=1e-2,
         eps=1e-8
