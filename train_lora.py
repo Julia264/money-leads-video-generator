@@ -273,7 +273,7 @@ def train_lora(zip_path, output_dir):
                     max_length=77,
                     return_tensors="pt"
                 ).input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
+                encoder_hidden_states = text_encoder(input_ids).last_hidden_state.half()
                 
                 # Add noise
                 noise = torch.randn_like(latents)
