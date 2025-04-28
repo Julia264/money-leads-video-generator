@@ -9,7 +9,7 @@ from diffusers.training_utils import set_seed
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 
-# 🟢 Custom dataset
+# 🟢 Dataset Class
 class FrameDataset(Dataset):
     def __init__(self, root_dir, prompt_dict, image_size=512):
         self.samples = []
@@ -34,11 +34,11 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Correct inject_lora (FOR YOUR CASE)
+# 🟡 Inject LoRA Correctly
 def inject_lora(unet):
     unet.set_attn_processor(LoRAAttnProcessor())
 
-# 🔵 Training function
+# 🔵 Training Function
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     set_seed(42)
@@ -52,10 +52,9 @@ def train_lora(data_dir, prompts, output_dir):
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
 
-    # Inject LoRA into UNet
     inject_lora(pipe.unet)
 
-    # Dataset and dataloader
+    # Load dataset
     dataset = FrameDataset(data_dir, prompts)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2)
 
@@ -63,10 +62,10 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 adjust number of epochs
+    for epoch in range(3):  # 🔥 يمكنك تعديل عدد الـ Epochs
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
-                images = images.to(accelerator.device)
+                images = images.to(accelerator.device, dtype=torch.float16)  # 🛠️ تعديل مهم
 
                 input_ids = tokenizer(captions, padding="max_length", truncation=True, max_length=77, return_tensors="pt").input_ids.to(accelerator.device)
                 encoder_hidden_states = text_encoder(input_ids).last_hidden_state
@@ -90,7 +89,7 @@ def train_lora(data_dir, prompts, output_dir):
     pipe.save_pretrained(output_dir)
     print("✅ Training complete! Model saved at:", output_dir)
 
-# 🔥 Main function
+# 🔥 Main Execution
 if __name__ == "__main__":
     BASE_DIR = os.getcwd()
 
@@ -107,7 +106,7 @@ if __name__ == "__main__":
         "مدهش": "a person amazed saying Amazing!"
     }
 
-    data_dir = os.path.join(BASE_DIR, "dataset")
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ تعدلها للمسار الصحيح للفريمات
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
