@@ -62,19 +62,24 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 يمكنك تعديل عدد الـ Epochs
+    for epoch in range(3):  # 🔥 يمكنك تعديل عدد الـ Epochs حسب قوة جهازك
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
-                images = images.to(accelerator.device, dtype=torch.float16)  # 🛠️ تعديل مهم
+                images = images.to(accelerator.device, dtype=torch.float16)
+
+                # Encode images into latents
+                with torch.no_grad():
+                    latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
 
                 input_ids = tokenizer(captions, padding="max_length", truncation=True, max_length=77, return_tensors="pt").input_ids.to(accelerator.device)
                 encoder_hidden_states = text_encoder(input_ids).last_hidden_state
 
-                noise = torch.randn_like(images)
-                timesteps = torch.randint(0, 1000, (images.shape[0],), device=images.device).long()
+                noise = torch.randn_like(latents)
+                timesteps = torch.randint(0, 1000, (latents.shape[0],), device=latents.device).long()
 
-                noisy_images = pipe.scheduler.add_noise(images, noise, timesteps)
-                model_pred = pipe.unet(noisy_images, timesteps, encoder_hidden_states=encoder_hidden_states).sample
+                noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
+
+                model_pred = pipe.unet(noisy_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
 
                 loss = torch.nn.functional.mse_loss(model_pred, noise)
 
@@ -106,7 +111,7 @@ if __name__ == "__main__":
         "مدهش": "a person amazed saying Amazing!"
     }
 
-    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ تعدلها للمسار الصحيح للفريمات
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ لو مسار الفريمات مختلف عدله هنا
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
