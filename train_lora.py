@@ -62,7 +62,8 @@ class TwoActionDataset(Dataset):
                 logger.warning("Invalid tensor values detected")
                 return None, None
 
-            return tensor, prompt
+            return tensor.half(), prompt
+
         except Exception as e:
             logger.warning(f"Error loading tensor: {str(e)}")
             return None, None
