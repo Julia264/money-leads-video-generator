@@ -34,18 +34,33 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Inject LoRA Correctly using LoRAAttnProcessor2_0
+# 🟡 Inject LoRA Correctly (NEW FIXED VERSION)
 def inject_lora(unet, r=4, lora_alpha=1):
     lora_attn_procs = {}
+    unet_hidden_size = unet.config.block_out_channels
+
+    counter = 0
     for name, module in unet.attn_processors.items():
         if module is None:
             continue
-        lora_attn_procs[name] = LoRAAttnProcessor2_0(
-            hidden_size=module.hidden_size,
-            cross_attention_dim=module.cross_attention_dim,
-            rank=r,
-            lora_alpha=lora_alpha,
-        )
+
+        if "attn1" in name or "attn2" in name:
+            cross_attention_dim = getattr(module, "cross_attention_dim", None)
+
+            lora_attn_procs[name] = LoRAAttnProcessor2_0(
+                hidden_size=unet_hidden_size[counter],
+                cross_attention_dim=cross_attention_dim,
+                rank=r,
+                lora_alpha=lora_alpha,
+            )
+
+        if "mid_block" in name:
+            counter = len(unet_hidden_size) - 1
+        elif "up_blocks" in name:
+            counter -= 1
+        elif "down_blocks" in name:
+            counter += 1
+
     unet.set_attn_processor(lora_attn_procs)
 
 # 🔵 Training Function
@@ -72,7 +87,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 يمكنك تعديل عدد الـ Epochs حسب الرغبة
+    for epoch in range(3):  # 🔥 ممكن تزود أو تقلل عدد epochs
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 images = images.to(accelerator.device, dtype=torch.float16)
@@ -121,7 +136,7 @@ if __name__ == "__main__":
         "مدهش": "a person amazed saying Amazing!"
     }
 
-    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ مسار مجلد الفريمات
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ عدل لو مكان الفريمات مختلف
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
