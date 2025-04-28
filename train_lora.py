@@ -65,9 +65,11 @@ def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     set_seed(42)
     
-    # Enable gradient checkpointing to save memory
-    torch.backends.cuda.enable_flash_sdp(True)
-    torch.backends.cuda.enable_mem_efficient_sdp(True)
+    # Enable memory efficient attention if available
+    if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+        torch.backends.cuda.enable_flash_sdp(True)
+    if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
 
     # Load pipeline with float16 precision
     pipe = StableDiffusionPipeline.from_pretrained(
@@ -120,9 +122,6 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    # Gradient scaler for mixed precision
-    scaler = torch.cuda.amp.GradScaler()
-
     for epoch in range(3):
         for step, batch in enumerate(dataloader):
             if batch is None or batch[0] is None:
@@ -159,7 +158,7 @@ def train_lora(data_dir, prompts, output_dir):
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
                 # Predict noise with mixed precision
-                with torch.autocast(device_type='cuda', dtype=torch.float16):
+                with accelerator.autocast():
                     model_pred = pipe.unet(
                         noisy_latents, 
                         timesteps, 
@@ -169,15 +168,14 @@ def train_lora(data_dir, prompts, output_dir):
                     # Calculate loss with safeguards
                     loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float(), reduction="mean")
 
-                # Backpropagate with gradient scaling
-                scaler.scale(loss).backward()
+                # Backpropagate
+                accelerator.backward(loss)
                 
                 # Gradient clipping
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+                if accelerator.sync_gradients:
+                    accelerator.clip_grad_norm_(pipe.unet.parameters(), 1.0)
                 
-                scaler.step(optimizer)
-                scaler.update()
+                optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
 
