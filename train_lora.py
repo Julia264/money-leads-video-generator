@@ -237,7 +237,7 @@ def train_lora(zip_path, output_dir):
             # Backprop
             accelerator.backward(loss)
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+                #accelerator.clip_grad_norm_(pipe.unet.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad()
             lr_scheduler.step()
