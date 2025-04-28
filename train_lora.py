@@ -22,51 +22,51 @@ class TwoActionDataset(Dataset):
         
         Args:
             zip_path: Path to Dataset2.zip
-            image_size: Target image size
+            image_size: Ignored here because .pt tensors are loaded directly
         """
         self.samples = []
-        self.transform = transforms.Compose([
-            transforms.Resize((image_size, image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5]*3, [0.5]*3)
-        ])
         
-        # Extract frames directly from zip without saving to disk
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Get list of files in zip
             file_list = zip_ref.namelist()
             
-            # Process clapping frames
-            clapping_files = [f for f in file_list if 'clapping' in f.lower() and f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-            for img_file in clapping_files:
-                with zip_ref.open(img_file) as img_data:
-                    self.samples.append((img_data, "a person clapping hands"))
+            clapping_files = [f for f in file_list if 'clapping' in f.lower() and f.lower().endswith('.pt')]
+            for pt_file in clapping_files:
+                self.samples.append((pt_file, "a person clapping hands"))
             
-            # Process waving frames
-            waving_files = [f for f in file_list if 'waving' in f.lower() and f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-            for img_file in waving_files:
-                with zip_ref.open(img_file) as img_data:
-                    self.samples.append((img_data, "a person waving hello"))
+            waving_files = [f for f in file_list if 'waving' in f.lower() and f.lower().endswith('.pt')]
+            for pt_file in waving_files:
+                self.samples.append((pt_file, "a person waving hello"))
+
+        self.zip_path = zip_path  # Save zip path for loading in __getitem__
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        img_data, prompt = self.samples[idx]
+        file_name, prompt = self.samples[idx]
         try:
-            # Load image directly from zip data
-            image = Image.open(img_data).convert('RGB')
-            image = self.transform(image)
-            
-            # Validate tensor
-            if torch.isnan(image).any() or torch.isinf(image).any():
+            with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
+                with zip_ref.open(file_name) as pt_data:
+                    # Load tensor
+                    tensor = torch.load(pt_data, map_location="cpu")
+                    
+                    if tensor.dim() == 2:
+                        tensor = tensor.unsqueeze(0).repeat(3, 1, 1)  # Expand grayscale to 3 channels
+                    elif tensor.shape[0] != 3:
+                        raise ValueError(f"Unexpected tensor shape: {tensor.shape}")
+                    
+                    # Normalize manually [-1, 1] because no PIL transform
+                    tensor = (tensor - 0.5) / 0.5
+
+            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
                 logger.warning("Invalid tensor values detected")
                 return None, None
-                
-            return image, prompt
+
+            return tensor, prompt
         except Exception as e:
-            logger.warning(f"Error loading image: {str(e)}")
+            logger.warning(f"Error loading tensor: {str(e)}")
             return None, None
+
 
 def safe_collate(batch):
     """Collate function that filters out None samples"""
