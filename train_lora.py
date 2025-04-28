@@ -10,7 +10,7 @@ from lora_diffusion import inject_trainable_lora
 from diffusers.training_utils import set_seed
 import logging
 
-# 📋 Configure logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ class FrameDataset(Dataset):
                 frames = [os.path.join(label_path, f) for f in os.listdir(label_path) if f.endswith((".png", ".jpg", ".jpeg"))]
                 for f in frames:
                     self.samples.append((f, prompt_dict.get(label, "a person")))
+
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
@@ -43,7 +44,7 @@ class FrameDataset(Dataset):
             logger.warning(f"Error loading image {path}: {str(e)}")
             return None, None
 
-# ⚙️ Custom collate_fn
+# 🟢 custom collate_fn to skip bad samples
 def collate_fn(batch):
     batch = [item for item in batch if item[0] is not None]
     if len(batch) == 0:
@@ -51,7 +52,7 @@ def collate_fn(batch):
     images, prompts = zip(*batch)
     return torch.stack(images), list(prompts)
 
-# 🛠️ LoRA Injection
+# 🟢 LoRA Injection
 def inject_lora(unet, r=4):
     inject_trainable_lora(
         unet,
@@ -59,18 +60,18 @@ def inject_lora(unet, r=4):
         target_replace_module=["CrossAttention", "Attention"],
     )
 
-# 🔵 Training
+# 🔵 Training function
 def train_lora(data_dir, prompts, output_dir):
     accelerator = Accelerator()
     set_seed(42)
 
-    # Optional: enable memory efficient attention
+    # Enable memory efficient attention if possible
     if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
         torch.backends.cuda.enable_flash_sdp(True)
     if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
         torch.backends.cuda.enable_mem_efficient_sdp(True)
 
-    # Load Stable Diffusion Pipeline
+    # Load pipeline
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
@@ -78,10 +79,10 @@ def train_lora(data_dir, prompts, output_dir):
         requires_safety_checker=False,
     ).to(accelerator.device)
 
-    # Use DDPM scheduler
+    # Replace scheduler for better stability
     pipe.scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
 
-    # Freeze VAE and text encoder
+    # Freeze VAE and Text Encoder
     pipe.unet.requires_grad_(False)
     pipe.vae.requires_grad_(False)
     pipe.text_encoder.requires_grad_(False)
@@ -94,32 +95,17 @@ def train_lora(data_dir, prompts, output_dir):
     # Inject LoRA
     inject_lora(pipe.unet)
 
-    # Load dataset
+    # Prepare dataset and dataloader
     dataset = FrameDataset(data_dir, prompts)
-    dataloader = DataLoader(
-        dataset,
-        batch_size=1,
-        shuffle=True,
-        num_workers=2,
-        collate_fn=collate_fn,
-    )
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=2, collate_fn=collate_fn)
 
-    # Optimizer (with smaller learning rate)
-    optimizer = torch.optim.AdamW(
-        pipe.unet.parameters(),
-        lr=5e-6,       # Smaller learning rate to avoid NaN
-        weight_decay=1e-2
-    )
-
-    # Learning Rate Scheduler
+    optimizer = torch.optim.AdamW(pipe.unet.parameters(), lr=1e-4, weight_decay=1e-2)
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(dataloader)*3)
 
-    # Prepare all modules with accelerator
     pipe.unet, optimizer, dataloader, lr_scheduler = accelerator.prepare(
         pipe.unet, optimizer, dataloader, lr_scheduler
     )
 
-    # Start training
     pipe.unet.train()
 
     for epoch in range(3):
@@ -134,9 +120,10 @@ def train_lora(data_dir, prompts, output_dir):
 
                 # Encode images to latents
                 with torch.no_grad():
-                    latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
+                    latents = pipe.vae.encode(images).latent_dist.sample()
+                    latents = latents * 0.18215
 
-                # Encode prompts
+                # Encode text
                 input_ids = tokenizer(
                     captions,
                     padding="max_length",
@@ -146,16 +133,13 @@ def train_lora(data_dir, prompts, output_dir):
                 ).input_ids.to(accelerator.device)
 
                 with torch.no_grad():
-                    encoder_hidden_states = text_encoder(input_ids.to(text_encoder.device)).last_hidden_state
+                    encoder_hidden_states = text_encoder(input_ids).last_hidden_state
 
-                # Add noise
                 noise = torch.randn_like(latents)
-                bs = latents.shape[0]
-                timesteps = torch.randint(0, pipe.scheduler.config.num_train_timesteps, (bs,), device=latents.device).long()
-
+                timesteps = torch.randint(0, pipe.scheduler.config.num_train_timesteps, (latents.size(0),), device=latents.device).long()
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
-                # Predict the noise residual
+                # Predict noise
                 with accelerator.autocast():
                     model_pred = pipe.unet(
                         noisy_latents,
@@ -163,12 +147,17 @@ def train_lora(data_dir, prompts, output_dir):
                         encoder_hidden_states=encoder_hidden_states
                     ).sample
 
-                # Calculate loss in float32
-                loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+                    loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float(), reduction="mean")
 
-                # Backward pass
+                # Check for NaN loss
+                if torch.isnan(loss):
+                    accelerator.print(f"⚠️ NaN loss detected at Epoch {epoch+1} Step {step}! Skipping...")
+                    continue
+
+                # Backprop
                 accelerator.backward(loss)
 
+                # Gradient clipping
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(pipe.unet.parameters(), 1.0)
 
@@ -178,9 +167,6 @@ def train_lora(data_dir, prompts, output_dir):
 
             if step % 10 == 0:
                 accelerator.print(f"Epoch {epoch+1} Step {step}: Loss = {loss.item():.4f}")
-                if torch.isnan(loss).any():
-                    accelerator.print("⚠️ NaN loss detected! Stopping training.")
-                    return
 
     # Save model
     accelerator.wait_for_everyone()
@@ -188,7 +174,7 @@ def train_lora(data_dir, prompts, output_dir):
         pipe.save_pretrained(output_dir)
         logger.info(f"✅ Training complete! Model saved at: {output_dir}")
 
-# 🚀 Main
+# 🔥 Main
 if __name__ == "__main__":
     BASE_DIR = os.getcwd()
 
