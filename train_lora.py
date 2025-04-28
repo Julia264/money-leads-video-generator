@@ -4,10 +4,10 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 from diffusers import StableDiffusionPipeline
-from diffusers.models.attention_processor import LoRAAttnProcessor2_0
 from diffusers.training_utils import set_seed
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
+from lora_diffusion import inject_trainable_lora
 
 # 🟢 Dataset Class
 class FrameDataset(Dataset):
@@ -34,20 +34,14 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Inject LoRA Correctly using `.from_attn_processor`
+# 🟡 Inject LoRA (باستخدام lora_diffusion)
 def inject_lora(unet, r=4, lora_alpha=1):
-    lora_attn_procs = {}
-    for name, module in unet.attn_processors.items():
-        if module is None:
-            continue
-
-        lora_attn_procs[name] = LoRAAttnProcessor2_0.from_attn_processor(
-            module,
-            rank=r,
-            lora_alpha=lora_alpha,
-        )
-
-    unet.set_attn_processor(lora_attn_procs)
+    inject_trainable_lora(
+        unet,
+        r=r,
+        lora_alpha=lora_alpha,
+        target_replace_module=["CrossAttention", "Attention"],
+    )
 
 # 🔵 Training Function
 def train_lora(data_dir, prompts, output_dir):
@@ -73,7 +67,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 عدل عدد epochs لو حابب
+    for epoch in range(3):  # 🔥 ممكن تغير عدد الـ Epochs
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 images = images.to(accelerator.device, dtype=torch.float16)
@@ -122,7 +116,7 @@ if __name__ == "__main__":
         "مدهش": "a person amazed saying Amazing!"
     }
 
-    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # 🛠️ تأكد مسار الفريمات صحيح
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # تأكد من مسار الفريمات
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
