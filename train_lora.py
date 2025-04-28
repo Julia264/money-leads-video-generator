@@ -41,7 +41,10 @@ def inject_lora(unet, r=4):
         r=r,
         target_replace_module=["CrossAttention", "Attention"],
     )
-    unet.to(dtype=torch.float16)  # 🔥 مهم جداً بعد الحقن
+    # 🛠 مهم: نلف على كل الموديولات ونحولها لـ float16
+    for name, module in unet.named_modules():
+        if hasattr(module, "to"):
+            module.to(dtype=torch.float16)
 
 # 🔵 Training Function
 def train_lora(data_dir, prompts, output_dir):
@@ -67,7 +70,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 يمكنك تغيير عدد الـ Epochs
+    for epoch in range(3):  # 🔥 عدد epochs حسب رغبتك
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 images = images.to(accelerator.device, dtype=torch.float16)
