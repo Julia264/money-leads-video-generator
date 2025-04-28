@@ -34,12 +34,11 @@ class FrameDataset(Dataset):
         image = self.transform(Image.open(path).convert("RGB"))
         return image, prompt
 
-# 🟡 Inject LoRA (باستخدام lora_diffusion)
-def inject_lora(unet, r=4, lora_alpha=1):
+# 🟡 Inject LoRA
+def inject_lora(unet, r=4):
     inject_trainable_lora(
         unet,
         r=r,
-        lora_alpha=lora_alpha,
         target_replace_module=["CrossAttention", "Attention"],
     )
 
@@ -67,7 +66,7 @@ def train_lora(data_dir, prompts, output_dir):
 
     pipe.unet.train()
 
-    for epoch in range(3):  # 🔥 ممكن تغير عدد الـ Epochs
+    for epoch in range(3):  # 🔥 ممكن تغير عدد epochs لو تحب
         for step, (images, captions) in enumerate(dataloader):
             with accelerator.accumulate(pipe.unet):
                 images = images.to(accelerator.device, dtype=torch.float16)
@@ -116,7 +115,7 @@ if __name__ == "__main__":
         "مدهش": "a person amazed saying Amazing!"
     }
 
-    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # تأكد من مسار الفريمات
+    data_dir = os.path.join(BASE_DIR, "datasets", "frames")  # ✔️ تأكد إن frames موجودة هنا
     output_dir = os.path.join(BASE_DIR, "models", "fine-tuned-motion")
 
     train_lora(data_dir, prompts, output_dir)
