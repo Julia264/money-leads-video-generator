@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from diffusers import StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
-from lora_diffusion import inject_trainable_lora  # Fixed typo: loraa -> lora
+from lora_diffusion import inject_trainable_lora
 from diffusers.training_utils import set_seed
 import logging
 from tqdm import tqdm
@@ -79,7 +79,7 @@ def safe_collate(batch):
     images, prompts = zip(*batch)
     return torch.stack(images), list(prompts)
 
-def inject_lora(unet, r=4):
+def inject_lora(unet, r=2):  # Reduced rank from 4 to 2
     try:
         inject_trainable_lora(
             unet,
@@ -128,8 +128,8 @@ def train_lora(zip_path, output_dir, action='clapping'):
 
     # Initialize accelerator with gradient accumulation
     accelerator = Accelerator(
-        gradient_accumulation_steps=4,  # Increased for stability
-        mixed_precision='no'  # We'll handle mixed precision manually
+        gradient_accumulation_steps=4,
+        mixed_precision='no'
     )
     set_seed(42)
     
@@ -193,7 +193,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
     # Optimizer with reduced learning rate
     optimizer = torch.optim.AdamW(
         pipe.unet.parameters(),
-        lr=1e-5,  # Reduced from 5e-5
+        lr=5e-6,  # Reduced from 1e-5
         betas=(0.9, 0.999),
         weight_decay=1e-2,
         eps=1e-8
@@ -229,8 +229,9 @@ def train_lora(zip_path, output_dir, action='clapping'):
             images = images.to(accelerator.device).half()
             
             with torch.no_grad():
-                # Encode images to latents
+                # Encode images to latents and normalize
                 latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
+                latents = latents / latents.std()  # Normalize to unit variance
                 
                 # Encode text
                 input_ids = tokenizer(
@@ -263,6 +264,12 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 if torch.isnan(model_pred).any() or torch.isinf(model_pred).any():
                     logger.warning("NaN or Inf detected in model predictions")
                 
+                # Inspect tensors at step 170
+                if step == 170:
+                    logger.info(f"Latents min/max: {latents.min().item()}/{latents.max().item()}")
+                    logger.info(f"Noisy latents min/max: {noisy_latents.min().item()}/{noisy_latents.max().item()}")
+                    logger.info(f"Model pred min/max: {model_pred.min().item()}/{model_pred.max().item()}")
+                
                 # Calculate loss in FP32 for stability
                 loss = torch.nn.functional.mse_loss(
                     model_pred.float(), 
@@ -274,12 +281,18 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 if torch.isnan(loss).any() or torch.isinf(loss).any():
                     logger.warning("NaN or Inf detected in loss")
 
+            # Check gradients before backward
+            for name, param in pipe.unet.named_parameters():
+                if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                    logger.warning(f"NaN or Inf detected in gradients of {name}")
+                    continue  # Skip backward pass for this step
+            
             # Backward pass
             accelerator.backward(loss)
             
             # Gradient clipping with increased norm
             if accelerator.sync_gradients:
-                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 2.0)
+                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 5.0)  # Increased from 2.0
             
             optimizer.step()
             optimizer.zero_grad()
@@ -310,6 +323,8 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 images = images.to(accelerator.device).half()
                 
                 latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
+                latents = latents / latents.std()  # Normalize to unit variance
+                
                 input_ids = tokenizer(
                     captions,
                     padding="max_length",
