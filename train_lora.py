@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from diffusers import StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
-from lora_diffusion import inject_trainable_loraa
+from lora_diffusion import inject_trainable_lora  # Fixed typo: loraa -> lora
 from diffusers.training_utils import set_seed
 import logging
 from tqdm import tqdm
