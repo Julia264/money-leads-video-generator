@@ -40,7 +40,7 @@ class PTFileDataset(Dataset):
                 with zip_ref.open(file_path) as pt_file:
                     tensor = torch.load(pt_file, map_location='cpu')
                     
-                    # Convert to FP32 first if needed
+                    # Convert to FP32 for stability
                     if tensor.dtype == torch.float16:
                         tensor = tensor.float()
                     
@@ -85,10 +85,10 @@ def inject_lora(unet, r=4):
         raise
 
 def train_lora(zip_path, output_dir, action='clapping'):
-    # Initialize accelerator without automatic mixed precision
+    # Initialize accelerator with fp16 mixed precision
     accelerator = Accelerator(
-        gradient_accumulation_steps=1,
-        mixed_precision='no'  # We'll handle mixed precision manually
+        mixed_precision='fp16',  # Let accelerator handle mixed precision
+        gradient_accumulation_steps=1
     )
     set_seed(42)
     
@@ -127,9 +127,10 @@ def train_lora(zip_path, output_dir, action='clapping'):
     train_dataset = PTFileDataset(zip_path, split='train', action=action)
     val_dataset = PTFileDataset(zip_path, split='val', action=action)
     
+    # Reduce batch size for stability
     train_dataloader = DataLoader(
         train_dataset,
-        batch_size=2,
+        batch_size=1,  # Reduced from 2
         shuffle=True,
         num_workers=2,
         collate_fn=safe_collate,
@@ -145,10 +146,10 @@ def train_lora(zip_path, output_dir, action='clapping'):
         persistent_workers=True
     )
 
-    # Optimizer
+    # Optimizer with reduced learning rate
     optimizer = torch.optim.AdamW(
         pipe.unet.parameters(),
-        lr=5e-5,
+        lr=1e-5,  # Reduced from 5e-5
         betas=(0.9, 0.999),
         weight_decay=1e-2,
         eps=1e-8
@@ -183,9 +184,8 @@ def train_lora(zip_path, output_dir, action='clapping'):
             images, captions = batch
             images = images.to(accelerator.device)
             
-            # Convert images to FP16 for training
-            images = images.half()
-
+            # No need to manually convert to half - accelerator handles this
+            
             with torch.no_grad():
                 # Encode images to latents
                 latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
@@ -209,27 +209,32 @@ def train_lora(zip_path, output_dir, action='clapping'):
             ).long()
             noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
-            # Forward pass with manual mixed precision
-            with torch.cuda.amp.autocast():
-                model_pred = pipe.unet(
-                    noisy_latents,
-                    timesteps,
-                    encoder_hidden_states=encoder_hidden_states
-                ).sample
+            # Forward pass - no need for manual mixed precision 
+            # accelerator handles this
+            model_pred = pipe.unet(
+                noisy_latents,
+                timesteps,
+                encoder_hidden_states=encoder_hidden_states
+            ).sample
 
-                # Calculate loss in FP32 for stability
-                loss = torch.nn.functional.mse_loss(
-                    model_pred.float(), 
-                    noise.float(), 
-                    reduction="mean"
-                )
+            # Calculate loss
+            loss = torch.nn.functional.mse_loss(
+                model_pred, 
+                noise, 
+                reduction="mean"
+            )
+
+            # Check for NaN loss
+            if torch.isnan(loss).any() or torch.isinf(loss).any():
+                logger.warning(f"NaN or Inf detected in loss at step {step}. Skipping...")
+                continue
 
             # Backward pass
             accelerator.backward(loss)
             
-            # Gradient clipping (in FP32)
+            # Gradient clipping
             if accelerator.sync_gradients:
-                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+                accelerator.clip_grad_norm_(pipe.unet.parameters(), max_norm=1.0)
             
             optimizer.step()
             optimizer.zero_grad()
@@ -251,13 +256,15 @@ def train_lora(zip_path, output_dir, action='clapping'):
         pipe.unet.eval()
         val_loss = 0
         val_batches = 0
+        
+        logger.info("Running validation...")
         with torch.no_grad():
-            for batch in val_dataloader:
+            for batch in tqdm(val_dataloader):
                 if batch is None or batch[0] is None:
                     continue
                     
                 images, captions = batch
-                images = images.to(accelerator.device).half()
+                images = images.to(accelerator.device)
                 
                 latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
                 input_ids = tokenizer(
@@ -282,9 +289,17 @@ def train_lora(zip_path, output_dir, action='clapping'):
                     timesteps,
                     encoder_hidden_states=encoder_hidden_states
                 ).sample
-                loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
-                val_loss += loss.item()
-                val_batches += 1
+                
+                # Check for NaN predictions
+                if torch.isnan(model_pred).any() or torch.isinf(model_pred).any():
+                    logger.warning("NaN or Inf detected in validation predictions. Skipping batch.")
+                    continue
+                    
+                loss = torch.nn.functional.mse_loss(model_pred, noise)
+                
+                if not torch.isnan(loss).any() and not torch.isinf(loss).any():
+                    val_loss += loss.item()
+                    val_batches += 1
 
         if val_batches > 0:
             avg_val_loss = val_loss / val_batches
@@ -294,12 +309,19 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 best_val_loss = avg_val_loss
                 if accelerator.is_main_process:
                     save_path = os.path.join(output_dir, "best_model")
+                    accelerator.wait_for_everyone()
+                    unwrapped_unet = accelerator.unwrap_model(pipe.unet)
+                    pipe.unet = unwrapped_unet
                     pipe.save_pretrained(save_path, safe_serialization=True)
                     logger.info(f"Saved best model with val loss: {best_val_loss:.4f}")
 
     # Final save
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
+        # Unwrap model before saving
+        unwrapped_unet = accelerator.unwrap_model(pipe.unet)
+        pipe.unet = unwrapped_unet
+        
         final_save_path = os.path.join(output_dir, "final_model")
         pipe.save_pretrained(final_save_path, safe_serialization=True)
         logger.info(f"Training complete! Model saved at: {final_save_path}")
@@ -318,4 +340,6 @@ if __name__ == "__main__":
         train_lora(zip_path, output_dir, action)
     except Exception as e:
         logger.error(f"Training failed: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise
