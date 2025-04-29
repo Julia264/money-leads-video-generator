@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from diffusers import StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
-from lora_diffusion import inject_trainable_lora
+from lora_diffusion import inject_trainable_loraa
 from diffusers.training_utils import set_seed
 import logging
 from tqdm import tqdm
@@ -249,7 +249,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 (latents.shape[0],), 
                 device=latents.device
             ).long()
-            noisy_latents = pipe.scheduler.add_noise(latents, noise, tippesteps)
+            noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
             # Forward pass with updated mixed precision
             with torch.amp.autocast('cuda'):
@@ -279,7 +279,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
             
             # Gradient clipping with increased norm
             if accelerator.sync_gradients:
-                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 2.0)  # Increased from 1.0
+                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 2.0)
             
             optimizer.step()
             optimizer.zero_grad()
