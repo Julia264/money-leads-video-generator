@@ -52,7 +52,7 @@ class TwoActionDataset(Dataset):
                     tensor = (tensor / 255.0) * 2.0 - 1.0
                     tensor = torch.clamp(tensor, -1.0, 1.0)
                     return tensor.half(), prompt
-          except Exception as e:
+        except Exception as e:
             logger.warning(f"Error loading tensor: {str(e)}")
             return None, None
 
@@ -308,21 +308,21 @@ class TwoActionDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx):
-        file_name, prompt = self.samples[idx]
-        try:
-            with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
-             with zip_ref.open(file_name) as pt_data:
+def __getitem__(self, idx):
+    file_name, prompt = self.samples[idx]
+    try:
+        with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
+            with zip_ref.open(file_name) as pt_data:
                 # Load tensor
                 tensor = torch.load(pt_data, map_location="cpu")
-                
+
                 # Check tensor shape
                 if tensor.dim() == 2:
                     tensor = tensor.unsqueeze(0).repeat(3, 1, 1)
                 elif tensor.shape[0] != 3:
                     logger.warning(f"Unexpected tensor shape: {tensor.shape}")
                     return None, None
-                
+
                 # Check if tensor is all zeros
                 if torch.all(tensor == 0):
                     logger.warning(f"Tensor is all zeros: {file_name}")
@@ -342,6 +342,7 @@ class TwoActionDataset(Dataset):
     except Exception as e:
         logger.warning(f"Error loading tensor: {str(e)}")
         return None, None
+
 
 
 def safe_collate(batch):
