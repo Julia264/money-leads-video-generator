@@ -52,7 +52,7 @@ class TwoActionDataset(Dataset):
                     tensor = (tensor / 255.0) * 2.0 - 1.0
                     tensor = torch.clamp(tensor, -1.0, 1.0)
                     return tensor.half(), prompt
-        except Exception as e:
+          except Exception as e:
             logger.warning(f"Error loading tensor: {str(e)}")
             return None, None
 
