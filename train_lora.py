@@ -1,168 +1,321 @@
 import os
 import torch
+import zipfile
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 from diffusers import StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
 from lora_diffusion import inject_trainable_lora
 from diffusers.training_utils import set_seed
 import logging
+from tqdm import tqdm
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ✅ Dataset
-class ClappingTensorDataset(Dataset):
-    def __init__(self, root_dir):
-        self.samples = []
-        for split in ['train', 'val']:
-            split_dir = os.path.join(root_dir, split, 'clapping')
-            if not os.path.exists(split_dir):
-                continue
-            for fname in os.listdir(split_dir):
-                if fname.endswith('.pt'):
-                    self.samples.append((
-                        os.path.join(split_dir, fname),
-                        "a person clapping hands",
-                        split
-                    ))
+class PTFileDataset(Dataset):
+    def __init__(self, zip_path, split='train', action='clapping'):
+        self.zip_path = zip_path
+        self.split = split
+        self.action = action
+        self.file_paths = []
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for file in zip_ref.namelist():
+                if (f"{split}/{action}/" in file and 
+                    file.endswith('.pt') and 
+                    not file.startswith('__MACOSX')):
+                    self.file_paths.append(file)
+        
+        logger.info(f"Found {len(self.file_paths)} .pt files for {split}/{action}")
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.file_paths)
 
     def __getitem__(self, idx):
-        path, prompt, split = self.samples[idx]
+        file_path = self.file_paths[idx]
         try:
-            tensor = torch.load(path, map_location="cpu")
-            if tensor.dim() == 2:
-                tensor = tensor.unsqueeze(0).repeat(3, 1, 1)
-            elif tensor.shape[0] != 3:
-                return None, None, None
-            if torch.isnan(tensor).any() or torch.isinf(tensor).any():
-                return None, None, None
-            tensor = (tensor / 255.0) * 2.0 - 1.0
-            tensor = torch.clamp(tensor, -1.0, 1.0)
-            return tensor.half(), prompt, split
-        except:
-            return None, None, None
+            with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
+                with zip_ref.open(file_path) as pt_file:
+                    tensor = torch.load(pt_file, map_location='cpu')
+                    
+                    # Convert to FP32 first if needed
+                    if tensor.dtype == torch.float16:
+                        tensor = tensor.float()
+                    
+                    # Validate tensor
+                    if tensor.dim() != 3 or tensor.size(0) != 3:
+                        logger.warning(f"Unexpected tensor shape {tensor.shape} in {file_path}")
+                        return None, None
+                        
+                    if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+                        logger.warning(f"Invalid tensor values in {file_path}")
+                        return None, None
+                        
+                    prompt = {
+                        'clapping': 'a person clapping hands',
+                        'waving': 'a person waving hello'
+                    }.get(self.action, f"a person {self.action}")
+                    
+                    return tensor, prompt
+                    
+        except Exception as e:
+            logger.warning(f"Error loading {file_path}: {str(e)}")
+            return None, None
 
 def safe_collate(batch):
-    batch = [b for b in batch if b[0] is not None]
+    batch = [item for item in batch if item[0] is not None]
     if not batch:
         return None, None
-    imgs, prompts, _ = zip(*batch)
-    return torch.stack(imgs), list(prompts)
+        
+    images, prompts = zip(*batch)
+    return torch.stack(images), list(prompts)
 
-# ✅ LoRA
-def inject_lora_layers(unet):
-    inject_trainable_lora(
-        unet,
-        r=4,
-        target_replace_module=["CrossAttention", "Attention"],
+def inject_lora(unet, r=4):
+    try:
+        inject_trainable_lora(
+            unet,
+            r=r,
+            target_replace_module=["CrossAttention", "Attention"],
+        )
+        logger.info("Successfully injected LoRA layers")
+    except Exception as e:
+        logger.error(f"Failed to inject LoRA: {str(e)}")
+        raise
+
+def train_lora(zip_path, output_dir, action='clapping'):
+    # Initialize accelerator without automatic mixed precision
+    accelerator = Accelerator(
+        gradient_accumulation_steps=1,
+        mixed_precision='no'  # We'll handle mixed precision manually
     )
-    logger.info("LoRA layers injected.")
-
-# ✅ Train
-def train_lora(data_dir, output_dir):
-    accelerator = Accelerator()
     set_seed(42)
+    
+    # Enable memory efficient attention
+    if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+        torch.backends.cuda.enable_flash_sdp(True)
+    if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
 
-    logger.info("Loading pipeline...")
+    # Load pipeline with FP16 weights
+    logger.info("Loading Stable Diffusion pipeline...")
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
         safety_checker=None,
-        requires_safety_checker=False
+        requires_safety_checker=False,
     ).to(accelerator.device)
-
+    
     pipe.scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
+
+    # Freeze components
     pipe.unet.requires_grad_(False)
     pipe.vae.requires_grad_(False)
     pipe.text_encoder.requires_grad_(False)
 
+    # Load text components
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
+    text_encoder = text_encoder.to(dtype=torch.float16)
 
-    inject_lora_layers(pipe.unet)
+    # Inject LoRA
+    inject_lora(pipe.unet)
 
-    dataset = ClappingTensorDataset(data_dir)
-    if len(dataset) == 0:
-        raise ValueError("No valid samples found!")
+    # Prepare datasets
+    logger.info("Preparing datasets...")
+    train_dataset = PTFileDataset(zip_path, split='train', action=action)
+    val_dataset = PTFileDataset(zip_path, split='val', action=action)
+    
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=2,
+        shuffle=True,
+        num_workers=2,
+        collate_fn=safe_collate,
+        persistent_workers=True
+    )
+    
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=1,
+        collate_fn=safe_collate,
+        persistent_workers=True
+    )
 
-    train_data = [d for d in dataset if d[2] == "train"]
-    val_data = [d for d in dataset if d[2] == "val"]
+    # Optimizer
+    optimizer = torch.optim.AdamW(
+        pipe.unet.parameters(),
+        lr=5e-5,
+        betas=(0.9, 0.999),
+        weight_decay=1e-2,
+        eps=1e-8
+    )
 
-    logger.info(f"TRAIN set: {len(train_data)} valid samples")
-    logger.info(f"VAL set: {len(val_data)} valid samples")
+    # Learning rate scheduler
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 
+        T_max=len(train_dataloader) * 5,
+        eta_min=1e-6
+    )
 
-    train_loader = DataLoader(train_data, batch_size=2, shuffle=True, collate_fn=safe_collate)
-    val_loader = DataLoader(val_data, batch_size=1, shuffle=False, collate_fn=safe_collate)
+    # Prepare with accelerator
+    pipe.unet, optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
+        pipe.unet, optimizer, train_dataloader, val_dataloader, lr_scheduler
+    )
 
-    optimizer = torch.optim.AdamW(pipe.unet.parameters(), lr=5e-5)
-    pipe.unet, optimizer, train_loader, val_loader = accelerator.prepare(pipe.unet, optimizer, train_loader, val_loader)
-
-    for epoch in range(5):
+    # Training loop
+    num_epochs = 5
+    best_val_loss = float('inf')
+    
+    logger.info("Starting training...")
+    for epoch in range(num_epochs):
         pipe.unet.train()
-        running_loss = 0
-        for step, batch in enumerate(train_loader):
-            if batch is None:
+        epoch_loss = 0
+        valid_batches = 0
+        
+        for step, batch in enumerate(train_dataloader):
+            if batch is None or batch[0] is None:
                 continue
-            images, prompts = batch
+
+            images, captions = batch
             images = images.to(accelerator.device)
+            
+            # Convert images to FP16 for training
+            images = images.half()
 
             with torch.no_grad():
+                # Encode images to latents
                 latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
-                input_ids = tokenizer(prompts, padding="max_length", truncation=True, max_length=77, return_tensors="pt").input_ids.to(accelerator.device)
+                
+                # Encode text
+                input_ids = tokenizer(
+                    captions,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=77,
+                    return_tensors="pt"
+                ).input_ids.to(accelerator.device)
                 encoder_hidden_states = text_encoder(input_ids).last_hidden_state
 
+            # Add noise
             noise = torch.randn_like(latents)
-            timesteps = torch.randint(0, pipe.scheduler.config.num_train_timesteps, (latents.shape[0],), device=latents.device).long()
+            timesteps = torch.randint(
+                0, pipe.scheduler.config.num_train_timesteps, 
+                (latents.shape[0],), 
+                device=latents.device
+            ).long()
             noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
-            with accelerator.autocast():
-                model_pred = pipe.unet(noisy_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
-                loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
+            # Forward pass with manual mixed precision
+            with torch.cuda.amp.autocast():
+                model_pred = pipe.unet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
 
-            if torch.isnan(loss).any() or torch.isinf(loss).any():
-                continue
+                # Calculate loss in FP32 for stability
+                loss = torch.nn.functional.mse_loss(
+                    model_pred.float(), 
+                    noise.float(), 
+                    reduction="mean"
+                )
 
+            # Backward pass
             accelerator.backward(loss)
+            
+            # Gradient clipping (in FP32)
+            if accelerator.sync_gradients:
+                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+            
             optimizer.step()
             optimizer.zero_grad()
-            running_loss += loss.item()
-
+            lr_scheduler.step()
+            
+            epoch_loss += loss.item()
+            valid_batches += 1
+            
             if step % 10 == 0:
-                logger.info(f"Epoch {epoch+1} Step {step}: Loss = {loss.item():.4f}")
-
-        logger.info(f"Epoch {epoch+1} Avg Loss = {running_loss / (step + 1):.4f}")
+                avg_loss = epoch_loss / valid_batches if valid_batches > 0 else 0
+                logger.info(
+                    f"Epoch {epoch+1}/{num_epochs} | "
+                    f"Step {step}/{len(train_dataloader)} | "
+                    f"Loss: {avg_loss:.4f} | "
+                    f"LR: {lr_scheduler.get_last_lr()[0]:.2e}"
+                )
 
         # Validation
         pipe.unet.eval()
         val_loss = 0
+        val_batches = 0
         with torch.no_grad():
-            for batch in val_loader:
-                if batch is None:
+            for batch in val_dataloader:
+                if batch is None or batch[0] is None:
                     continue
-                images, prompts = batch
-                images = images.to(accelerator.device)
+                    
+                images, captions = batch
+                images = images.to(accelerator.device).half()
+                
                 latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
-                input_ids = tokenizer(prompts, padding="max_length", truncation=True, max_length=77, return_tensors="pt").input_ids.to(accelerator.device)
+                input_ids = tokenizer(
+                    captions,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=77,
+                    return_tensors="pt"
+                ).input_ids.to(accelerator.device)
                 encoder_hidden_states = text_encoder(input_ids).last_hidden_state
+                
                 noise = torch.randn_like(latents)
-                timesteps = torch.randint(0, pipe.scheduler.config.num_train_timesteps, (latents.shape[0],), device=latents.device).long()
+                timesteps = torch.randint(
+                    0, pipe.scheduler.config.num_train_timesteps,
+                    (latents.shape[0],),
+                    device=latents.device
+                ).long()
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
-                model_pred = pipe.unet(noisy_latents, timesteps, encoder_hidden_states=encoder_hidden_states).sample
-                val_loss += torch.nn.functional.mse_loss(model_pred.float(), noise.float()).item()
+                
+                model_pred = pipe.unet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
+                loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
+                val_loss += loss.item()
+                val_batches += 1
 
-        logger.info(f"Epoch {epoch+1} Validation Loss = {val_loss / len(val_loader):.4f}")
+        if val_batches > 0:
+            avg_val_loss = val_loss / val_batches
+            logger.info(f"Epoch {epoch+1} Validation Loss: {avg_val_loss:.4f}")
+            
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                if accelerator.is_main_process:
+                    save_path = os.path.join(output_dir, "best_model")
+                    pipe.save_pretrained(save_path, safe_serialization=True)
+                    logger.info(f"Saved best model with val loss: {best_val_loss:.4f}")
 
-    pipe.save_pretrained(output_dir)
-    logger.info("Training complete. Final model saved.")
+    # Final save
+    accelerator.wait_for_everyone()
+    if accelerator.is_main_process:
+        final_save_path = os.path.join(output_dir, "final_model")
+        pipe.save_pretrained(final_save_path, safe_serialization=True)
+        logger.info(f"Training complete! Model saved at: {final_save_path}")
 
-# ✅ Run
 if __name__ == "__main__":
-    data_dir = "/home/ubuntu/money-leads-video-generator/Dataset2"
+    zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"
     output_dir = "/home/ubuntu/money-leads-video-generator/lora_model"
+    action = "clapping"  # Change to "waving" if needed
+    
     os.makedirs(output_dir, exist_ok=True)
-    train_lora(data_dir, output_dir)
+    
+    if not os.path.exists(zip_path):
+        raise FileNotFoundError(f"Dataset zip file not found at {zip_path}")
+    
+    try:
+        train_lora(zip_path, output_dir, action)
+    except Exception as e:
+        logger.error(f"Training failed: {str(e)}")
+        raise
