@@ -304,7 +304,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
         pipe.save_pretrained(final_save_path, safe_serialization=True)
         logger.info(f"Training complete! Model saved at: {final_save_path}")
 
-if _name_ == "_main_":
+if __name__ == "_main_":
     zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"
     output_dir = "/home/ubuntu/money-leads-video-generator/lora_model"
     action = "clapping"  # Change to "waving" if needed
