@@ -1,49 +1,37 @@
-# app.py
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, send_from_directory
 from flask_cors import CORS
-from diffusers import AnimateDiffPipeline
 from PIL import Image
+from diffusers import StableVideoDiffusionPipeline
 import torch
-import numpy as np
-from moviepy import ImageSequenceClip
 import tempfile
-import os
+from moviepy.editor import ImageSequenceClip
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 CORS(app)
 
-BASE_DIR = os.getcwd()
-
-pipe = AnimateDiffPipeline.from_pretrained(
-    os.path.join(BASE_DIR, "models", "fine-tuned-motion"),
-    torch_dtype=torch.float16
-).to("cuda" if torch.cuda.is_available() else "cpu")
-
-PROMPT_MAP = {
-    "clap": "a person clapping hands",
-    "wave": "a person waving",
-    "thumbs_up": "a person giving thumbs up"
-}
+# Load pipeline once
+pipe = StableVideoDiffusionPipeline.from_pretrained(
+    "stabilityai/stable-video-diffusion-img2vid",
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+)
+pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
 
-@app.route("/generate", methods=["POST"])
-def generate():
-    image = Image.open(request.files["image"]).convert("RGB")
-    action = request.form.get("action", "clap")
-    prompt = PROMPT_MAP.get(action, "a person clapping hands")
+@app.route("/generate-video", methods=["POST"])
+def generate_video():
+    image_file = request.files["image"]
+    img = Image.open(image_file).convert("RGB")
+    img = img.resize((384, 384))
 
-    image = image.resize((512, 512))
-    frames = pipe(prompt=prompt, image=image, num_frames=16).frames[0]
-    frames = [np.array(f) for f in frames]
+    video_frames = pipe(img, num_frames=6).frames[0]
 
-    clip = ImageSequenceClip(frames, fps=10)
-    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    clip.write_videofile(temp.name, codec="libx264", audio=False)
-
-    return send_file(temp.name, as_attachment=True, download_name="generated.mp4")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
+        clip = ImageSequenceClip(video_frames, fps=7)
+        clip.write_videofile(temp.name, codec="libx264", audio=False)
+        return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output.mp4")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
