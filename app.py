@@ -44,7 +44,7 @@ def generate_video():
 
     # Create the video with 30fps
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
-        clip = ImageSequenceClip(video_frames, fps=30)
+        clip = ImageSequenceClip(video_frames, fps=50)
 
         # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
         clip = clip.with_duration(3)  # Set video duration to 5 seconds
