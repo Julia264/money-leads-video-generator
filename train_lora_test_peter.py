@@ -165,9 +165,9 @@ def train_lora(zip_path, output_dir, action='clapping'):
         eta_min=1e-6
     )
 
-    # Prepare with accelerator
-    pipe.unet, optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
-        pipe.unet, optimizer, train_dataloader, val_dataloader, lr_scheduler
+    # Prepare with accelerator - don't prepare the UNet with accelerator
+    optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
+        optimizer, train_dataloader, val_dataloader, lr_scheduler
     )
 
     # Training loop
@@ -234,7 +234,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
             
             # Gradient clipping
             if accelerator.sync_gradients:
-                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+                accelerator.clip_grad_norm_(pipe.unet.parameters(), 1.0)
             
             optimizer.step()
             optimizer.zero_grad()
