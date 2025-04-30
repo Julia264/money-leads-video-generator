@@ -47,10 +47,10 @@ def generate_video():
         clip = ImageSequenceClip(video_frames, fps=30)
 
         # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
-        clip = clip.with_duration(5)  # Set video duration to 5 seconds
+        clip = clip.with_duration(3)  # Set video duration to 5 seconds
 
         # Zoom effect: Scale the video gradually over time
-        #clip = clip.resize(lambda t: 1 + 0.09 * t)  # Zoom-in effect over time (1 + 0.05 * time)
+        #clip = clip.resize(lambda t: 1 + 0.11 * t)  # Zoom-in effect over time (1 + 0.08 * time)
 
         # Optionally, add a fade-in effect for smooth transition
         #clip = fadein(clip, duration=5)  # fade-in over 1 second
