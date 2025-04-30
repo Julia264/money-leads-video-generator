@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(_name_)
+logger = logging.getLogger(__name__)
 
 class PTFileDataset(Dataset):
     def _init_(self, zip_path, split='train', action='clapping'):
