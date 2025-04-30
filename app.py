@@ -6,6 +6,7 @@ import torch
 import tempfile
 from moviepy import ImageSequenceClip
 from moviepy import VideoFileClip
+from moviepy.video.fx.all import fadein
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
@@ -53,7 +54,7 @@ def generate_video():
         #clip = clip.resize(lambda t: 1 + 0.09 * t)  # Zoom-in effect over time (1 + 0.05 * time)
 
         # Optionally, add a fade-in effect for smooth transition
-        clip = clip.fadein(5)  # Apply fade-in effect over 1 second
+        clip = fadein(clip, duration=1)  # fade-in over 1 second
 
         # Write the final video with motion (zoom-in effect)
         clip.write_videofile(temp.name, codec="libx264", audio=False)
