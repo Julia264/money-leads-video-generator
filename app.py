@@ -6,7 +6,7 @@ import torch
 import tempfile
 from moviepy import ImageSequenceClip , fadein
 from moviepy import VideoFileClip
-from moviepy.video.fx.all import fadein
+#from moviepy.video.fx.all import fadein
 import numpy as np
 
 app = Flask(__name__, static_url_path='/static')
