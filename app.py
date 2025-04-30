@@ -50,10 +50,10 @@ def generate_video():
         clip = clip.with_duration(5)  # Set video duration to 5 seconds
 
         # Zoom effect: Scale the video gradually over time
-        clip = clip.resize(lambda t: 1 + 0.05 * t)  # Zoom-in effect over time (1 + 0.05 * time)
+        #clip = clip.resize(lambda t: 1 + 0.09 * t)  # Zoom-in effect over time (1 + 0.05 * time)
 
         # Optionally, add a fade-in effect for smooth transition
-        clip = clip.fadein(1)  # Apply fade-in effect over 1 second
+        clip = clip.fadein(5)  # Apply fade-in effect over 1 second
 
         # Write the final video with motion (zoom-in effect)
         clip.write_videofile(temp.name, codec="libx264", audio=False)
