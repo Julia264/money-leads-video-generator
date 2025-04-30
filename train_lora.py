@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class PTFileDataset(Dataset):
-    def _init_(self, zip_path, split='train', action='clapping'):
+    def __init__(self, zip_path, split='train', action='clapping'):
         self.zip_path = zip_path
         self.split = split
         self.action = action
@@ -30,10 +30,10 @@ class PTFileDataset(Dataset):
         
         logger.info(f"Found {len(self.file_paths)} .pt files for {split}/{action}")
 
-    def _len_(self):
+    def __len__(self):
         return len(self.file_paths)
 
-    def _getitem_(self, idx):
+    def __getitem__(self, idx):
         file_path = self.file_paths[idx]
         try:
             with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
@@ -304,7 +304,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
         pipe.save_pretrained(final_save_path, safe_serialization=True)
         logger.info(f"Training complete! Model saved at: {final_save_path}")
 
-if __name__ == "_main_":
+if __name__ == "__main__":
     zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"
     output_dir = "/home/ubuntu/money-leads-video-generator/lora_model"
     action = "clapping"  # Change to "waving" if needed
