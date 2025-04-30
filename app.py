@@ -6,7 +6,7 @@ import torch
 import tempfile
 from moviepy import ImageSequenceClip
 
-app = Flask(__name__, "static", "index.html")
+app = Flask(__name__, static_folder='static')
 CORS(app)
 
 # Load pipeline once
