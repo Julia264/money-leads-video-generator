@@ -4,7 +4,8 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy import ImageSequenceClip , fadein
+from moviepy import ImageSequenceClip 
+from moviepy.video.fx.fadein import fadein
 from moviepy import VideoFileClip
 #from moviepy.video.fx.all import fadein
 import numpy as np
