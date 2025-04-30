@@ -304,13 +304,13 @@ def train_lora(zip_path, output_dir, action='clapping'):
     # Final save
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        final_save_path = os.path.join(output_dir, "final_model")
+        final_save_path = os.path.join(output_dir, "final_model_peter")
         pipe.save_pretrained(final_save_path, safe_serialization=True)
         logger.info(f"Training complete! Model saved at: {final_save_path}")
 
 if __name__ == "__main__":
     zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"
-    output_dir = "/home/ubuntu/money-leads-video-generator/lora_model"
+    output_dir = "/home/ubuntu/money-leads-video-generator/peter_model"
     action = "clapping"  # Change to "waving" if needed
     
     os.makedirs(output_dir, exist_ok=True)
