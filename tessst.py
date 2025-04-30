@@ -13,7 +13,7 @@ pipe = StableDiffusionPipeline.from_pretrained(
 ).to(device)
 
 # 2. Load LoRA weights - CORRECTED METHOD
-lora_path = "/home/ubuntu/money-leads-video-generator/lora_model/best_model"
+lora_path = "/home/ubuntu/money-leads-video-generator/lora_model/final_model"
 pipe.unet.load_attn_procs(lora_path)
 
 # 3. Generate Frames
