@@ -4,9 +4,9 @@ from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
 import torch
 import tempfile
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 
-app = Flask(__name__, static_folder="static")
+app = Flask(__name__, "static", "index.html")
 CORS(app)
 
 # Load pipeline once
