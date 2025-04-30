@@ -92,7 +92,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
     # Initialize accelerator with mixed precision
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
-        mixed_precision='fp16'  # Let accelerator handle mixed precision
+        mixed_precision='fp16'
     )
     set_seed(42)
     
@@ -149,10 +149,10 @@ def train_lora(zip_path, output_dir, action='clapping'):
         persistent_workers=True
     )
 
-    # Optimizer - Use smaller learning rate for stability
+    # Optimizer
     optimizer = torch.optim.AdamW(
         pipe.unet.parameters(),
-        lr=1e-5,  # Reduced from 5e-5
+        lr=1e-5,
         betas=(0.9, 0.999),
         weight_decay=1e-2,
         eps=1e-8
@@ -173,7 +173,6 @@ def train_lora(zip_path, output_dir, action='clapping'):
     # Training loop
     num_epochs = 5
     best_val_loss = float('inf')
-    scaler = torch.cuda.amp.GradScaler()  # For mixed precision
     
     logger.info("Starting training...")
     for epoch in range(num_epochs):
@@ -191,32 +190,32 @@ def train_lora(zip_path, output_dir, action='clapping'):
             # Convert images to FP32 for VAE encoding
             images = images.float()
 
-            with torch.no_grad():
-                # Encode images to latents
-                latents = pipe.vae.encode(images).latent_dist.sample()
-                latents = latents * 0.18215  # Scale factor
-                
-                # Encode text
-                input_ids = tokenizer(
-                    captions,
-                    padding="max_length",
-                    truncation=True,
-                    max_length=77,
-                    return_tensors="pt"
-                ).input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
-
-            # Add noise
-            noise = torch.randn_like(latents)
-            timesteps = torch.randint(
-                0, pipe.scheduler.config.num_train_timesteps, 
-                (latents.shape[0],), 
-                device=latents.device
-            ).long()
-            noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
-
-            # Forward pass with mixed precision
             with accelerator.autocast():
+                with torch.no_grad():
+                    # Encode images to latents
+                    latents = pipe.vae.encode(images).latent_dist.sample()
+                    latents = latents * 0.18215  # Scale factor
+                    
+                    # Encode text
+                    input_ids = tokenizer(
+                        captions,
+                        padding="max_length",
+                        truncation=True,
+                        max_length=77,
+                        return_tensors="pt"
+                    ).input_ids.to(accelerator.device)
+                    encoder_hidden_states = text_encoder(input_ids).last_hidden_state
+
+                # Add noise
+                noise = torch.randn_like(latents)
+                timesteps = torch.randint(
+                    0, pipe.scheduler.config.num_train_timesteps, 
+                    (latents.shape[0],), 
+                    device=latents.device
+                ).long()
+                noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
+
+                # Forward pass
                 model_pred = pipe.unet(
                     noisy_latents,
                     timesteps,
@@ -230,18 +229,14 @@ def train_lora(zip_path, output_dir, action='clapping'):
                     reduction="mean"
                 )
 
-            # Backward pass with gradient scaling
-            accelerator.backward(scaler.scale(loss))
+            # Backward pass
+            accelerator.backward(loss)
             
-            # Unscale gradients before clipping
-            scaler.unscale_(optimizer)
+            # Gradient clipping
+            if accelerator.sync_gradients:
+                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
             
-            # Gradient clipping (in FP32)
-            torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
-            
-            # Step with scaler
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             optimizer.zero_grad()
             lr_scheduler.step()
             
@@ -269,32 +264,33 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 images, captions = batch
                 images = images.to(accelerator.device).float()
                 
-                latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
-                input_ids = tokenizer(
-                    captions,
-                    padding="max_length",
-                    truncation=True,
-                    max_length=77,
-                    return_tensors="pt"
-                ).input_ids.to(accelerator.device)
-                encoder_hidden_states = text_encoder(input_ids).last_hidden_state
-                
-                noise = torch.randn_like(latents)
-                timesteps = torch.randint(
-                    0, pipe.scheduler.config.num_train_timesteps,
-                    (latents.shape[0],),
-                    device=latents.device
-                ).long()
-                noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
-                
-                model_pred = pipe.unet(
-                    noisy_latents,
-                    timesteps,
-                    encoder_hidden_states=encoder_hidden_states
-                ).sample
-                loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
-                val_loss += loss.item()
-                val_batches += 1
+                with accelerator.autocast():
+                    latents = pipe.vae.encode(images).latent_dist.sample() * 0.18215
+                    input_ids = tokenizer(
+                        captions,
+                        padding="max_length",
+                        truncation=True,
+                        max_length=77,
+                        return_tensors="pt"
+                    ).input_ids.to(accelerator.device)
+                    encoder_hidden_states = text_encoder(input_ids).last_hidden_state
+                    
+                    noise = torch.randn_like(latents)
+                    timesteps = torch.randint(
+                        0, pipe.scheduler.config.num_train_timesteps,
+                        (latents.shape[0],),
+                        device=latents.device
+                    ).long()
+                    noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
+                    
+                    model_pred = pipe.unet(
+                        noisy_latents,
+                        timesteps,
+                        encoder_hidden_states=encoder_hidden_states
+                    ).sample
+                    loss = torch.nn.functional.mse_loss(model_pred.float(), noise.float())
+                    val_loss += loss.item()
+                    val_batches += 1
 
         if val_batches > 0:
             avg_val_loss = val_loss / val_batches
