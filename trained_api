@@ -1,21 +1,23 @@
 from flask import Flask, request, jsonify, send_from_directory
-from diffusers import StableVideoDiffusionPipeline
-import torch
+from diffusers import StableDiffusionPipeline, StableVideoDiffusionPipeline
+from moviepy.editor import ImageSequenceClip
 from PIL import Image
-import os
-import uuid
-from moviepy import ImageSequenceClip
+import torch, uuid, os
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
-# Load trained video diffusion model
-model_path = "/home/ubuntu/money-leads-video-generator/peter_model/final_model_peter"
-pipe = StableVideoDiffusionPipeline.from_pretrained(
-    model_path,
-    torch_dtype=torch.float32,
-    safety_checker=None,
-    requires_safety_checker=False
-).to("cuda" if torch.cuda.is_available() else "cpu")
+# Load SD with LoRA
+sd_pipe = StableDiffusionPipeline.from_pretrained(
+    "/home/ubuntu/money-leads-video-generator/peter_model/final_model_peter",
+    torch_dtype=torch.float32
+).to("cuda")
+
+# Load SVD pipeline (for motion generation)
+svd_pipe = StableVideoDiffusionPipeline.from_pretrained(
+    "stabilityai/stable-video-diffusion-img2vid",
+    torch_dtype=torch.float16,
+    variant="fp16"
+).to("cuda")
 
 @app.route("/")
 def home():
@@ -23,34 +25,29 @@ def home():
 
 @app.route("/generate", methods=["POST"])
 def generate_video():
-    if 'image' not in request.files:
-        return jsonify({"error": "No image uploaded"}), 400
-
-    image_file = request.files['image']
-
-    # 🧠 Fixed prompt: convert input to clapping
-    prompt = "a person clapping hands"
-
-    os.makedirs("static/uploads", exist_ok=True)
     os.makedirs("static/generated", exist_ok=True)
 
-    # Save and process image
-    input_path = f"static/uploads/{uuid.uuid4().hex}.png"
-    image_file.save(input_path)
-    image = Image.open(input_path).convert("RGB").resize((512, 512))
+    # Step 1: Generate image with LoRA SD
+    prompt = "a person clapping hands"
+    result = sd_pipe(prompt=prompt)
+    image = result.images[0]
+    
+    # Save image
+    temp_image_path = f"static/generated/{uuid.uuid4().hex}_image.png"
+    image.save(temp_image_path)
 
-    # Generate motion (frames)
-    video_frames = pipe(prompt=prompt, image=image).frames
+    # Step 2: Convert image to motion using SVD
+    image = image.resize((512, 512)).convert("RGB")
+    frames = svd_pipe(image).frames  # returns list of PIL Images
 
-    # Convert to video
-    video_filename = f"{uuid.uuid4().hex}.mp4"
-    output_path = f"static/generated/{video_filename}"
-
-    clip = ImageSequenceClip(video_frames, fps=8)
-    clip.write_videofile(output_path, codec="libx264")
+    # Convert frames to video
+    video_path = f"static/generated/{uuid.uuid4().hex}_video.mp4"
+    clip = ImageSequenceClip(frames, fps=8)
+    clip.write_videofile(video_path, codec="libx264")
 
     return jsonify({
-        "video_url": f"/static/generated/{video_filename}"
+        "image_url": f"/{temp_image_path}",
+        "video_url": f"/{video_path}"
     })
 
 if __name__ == "__main__":
