@@ -1,16 +1,14 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory, render_template_string
 import os
 import threading
 import logging
 from train_lora_test_peter import train_lora
 
-
-app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+app = Flask(__name__, static_folder="static")
 
 @app.route("/")
 def home():
-    return "LoRA Training API is running!"
+    return send_from_directory("static", "index.html")
 
 @app.route("/train", methods=["POST"])
 def trigger_training():
@@ -28,13 +26,12 @@ def trigger_training():
 
         os.makedirs(output_dir, exist_ok=True)
 
-        # Run training in a background thread so the API doesn't block
         thread = threading.Thread(target=train_lora, args=(zip_path, output_dir, action))
         thread.start()
 
         return jsonify({
             "status": "training_started",
-            "message": f"Training started for action '{action}'. Model will be saved in {output_dir}"
+            "message": f"Training started for action '{action}'."
         })
 
     except Exception as e:
@@ -43,4 +40,3 @@ def trigger_training():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
-
