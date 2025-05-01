@@ -298,14 +298,14 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 best_val_loss = avg_val_loss
                 if accelerator.is_main_process:
                     save_path = os.path.join(output_dir, "best_model")
-                    pipe.save_pretrained(save_path, safe_serialization=True)
+                    pipe.save_pretrained(save_path, safe_serialization=False)
                     logger.info(f"Saved best model with val loss: {best_val_loss:.4f}")
 
     # Final save
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         final_save_path = os.path.join(output_dir, "final_model_peter")
-        pipe.save_pretrained(final_save_path, safe_serialization=True)
+        pipe.save_pretrained(final_save_path, safe_serialization=False)
         logger.info(f"Training complete! Model saved at: {final_save_path}")
 
 if __name__ == "__main__":
