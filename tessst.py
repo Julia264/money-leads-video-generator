@@ -10,24 +10,23 @@ model_dir = "/home/ubuntu/money-leads-video-generator/peter_model/final_model_pe
 output_dir = "/home/ubuntu/money-leads-video-generator/output_videos"
 os.makedirs(output_dir, exist_ok=True)
 
-# 2. Load the model properly with device placement
+# 2. Load the model with proper device handling
 print("Loading trained model...")
 
-# First load to CPU to avoid meta tensor issues
+# First load to CPU with torch_dtype=torch.float32
 pipe = StableDiffusionPipeline.from_pretrained(
     model_dir,
-    torch_dtype=torch.float32,  # Start with float32 on CPU
+    torch_dtype=torch.float32,  # Must use float32 initially
     safety_checker=None
 )
 
-# Then move to GPU if available
+# Check if CUDA is available
 if torch.cuda.is_available():
     print("Moving model to GPU...")
-    pipe = pipe.to("cuda")
-    # Convert to float16 if on GPU
-    pipe.unet = pipe.unet.half()
-    pipe.vae = pipe.vae.half()
-    pipe.text_encoder = pipe.text_encoder.half()
+    # Move components individually with proper handling
+    pipe.unet = pipe.unet.to(torch.float16).to("cuda")
+    pipe.vae = pipe.vae.to(torch.float16).to("cuda")
+    pipe.text_encoder = pipe.text_encoder.to(torch.float16).to("cuda")
 else:
     print("Using CPU")
 
@@ -56,8 +55,8 @@ for i in range(num_frames):
     prompt = f"a person {current_action}, highly detailed, 4k resolution, professional photography"
     negative_prompt = "blurry, deformed, low quality, bad anatomy, extra limbs"
     
-    # Generate frame
-    with torch.no_grad():
+    # Generate frame with autocast if on GPU
+    with torch.autocast("cuda" if torch.cuda.is_available() else "cpu"):
         image = pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
