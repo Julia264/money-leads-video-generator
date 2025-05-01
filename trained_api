@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory
 from diffusers import StableDiffusionPipeline, StableVideoDiffusionPipeline
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 from PIL import Image
 import torch, uuid, os
 
