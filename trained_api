@@ -4,7 +4,7 @@ import torch
 from PIL import Image
 import os
 import uuid
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
