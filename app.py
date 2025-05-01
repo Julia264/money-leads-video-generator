@@ -2,32 +2,21 @@ from flask import Flask, request, send_file, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 from diffusers import StableVideoDiffusionPipeline
-from diffusers.utils import export_to_video
 import torch
 import tempfile
+from moviepy import ImageSequenceClip 
+from moviepy import VideoFileClip
 import numpy as np
-import os
 
 app = Flask(__name__, static_url_path='/static')
 CORS(app)
 
-# Initialize the pipeline with the base model
+# Load the pipeline once
 pipe = StableVideoDiffusionPipeline.from_pretrained(
     "stabilityai/stable-video-diffusion-img2vid",
-    torch_dtype=torch.float16,
-    variant="fp16"
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
 )
-
-# Load your custom trained LoRA weights
-pipe.unet.load_attn_procs("/home/ubuntu/money-leads-video-generator/peter_model/final_model_peter/unet")
-
-# Move pipeline to GPU if available
-device = "cuda" if torch.cuda.is_available() else "cpu"
-pipe = pipe.to(device)
-
-# Enable memory efficient attention if available
-if torch.__version__ >= "2.0.0":
-    pipe.enable_xformers_memory_efficient_attention()
+pipe.to("cuda" if torch.cuda.is_available() else "cpu")
 
 @app.route("/")
 def index():
@@ -35,44 +24,42 @@ def index():
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
-    try:
-        # Get the uploaded image
-        image_file = request.files["image"]
-        img = Image.open(image_file).convert("RGB")
-        
-        # Resize image to expected dimensions (1024x576 is recommended for SVD)
-        img = img.resize((1024, 576))
-        
-        # Generate video from the image
-        frames = pipe(
-            image=img,
-            decode_chunk_size=8,  # Adjust based on your GPU memory
-            motion_bucket_id=180,  # Controls motion amount (default 127)
-            noise_aug_strength=0.1,  # Controls noise augmentation (default 0.02)
-        ).frames[0]
-        
-        # Save to temporary file
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
-            temp_path = temp_file.name
-        
-        # Export frames to video
-        export_to_video(frames, temp_path, fps=7)  # SVD typically uses 7fps
-        
-        # Send the generated video back to the client
-        return send_file(
-            temp_path,
-            mimetype="video/mp4",
-            as_attachment=True,
-            download_name="generated_video.mp4"
-        )
-        
-    except Exception as e:
-        return {"error": str(e)}, 500
+    # Get the uploaded image
+    image_file = request.files["image"]
+    img = Image.open(image_file).convert("RGB")
+    img = img.resize((224, 224))  # Resize to fit the model input size (if needed)
+
+    # Convert image to tensor and normalize it
+    img_array = np.array(img) / 255.0  # Normalize the image
+    img_tensor = torch.tensor(img_array).unsqueeze(0).permute(0, 3, 1, 2)  # Add batch dimension and permute to [B, C, H, W]
     
-    finally:
-        # Clean up temporary file
-        if 'temp_path' in locals() and os.path.exists(temp_path):
-            os.unlink(temp_path)
+    # Ensure the tensor is of type float32
+    img_tensor = img_tensor.to(torch.float32)
+    
+    # Generate video from the image (num_frames is set to 6 in this example)
+    video_frames = pipe(img_tensor, num_frames=6).frames[0]
+
+    # Convert each frame to a numpy array if it's a PIL image
+    video_frames = [np.array(frame) for frame in video_frames]
+
+    # Create the video with 30fps
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp:
+        clip = ImageSequenceClip(video_frames, fps=30)
+
+        # Set the video duration to 5 seconds (for 30fps, 5 seconds = 5 * 30 = 150 frames)
+        clip = clip.with_duration(5)  # Set video duration to 5 seconds
+
+        # Zoom effect: Scale the video gradually over time
+        #clip = clip.resize(lambda t: 1 + 0.09 * t)  # Zoom-in effect over time (1 + 0.05 * time)
+
+        # Optionally, add a fade-in effect for smooth transition
+        #clip = fadein(clip, duration=5)  # fade-in over 1 second
+
+        # Write the final video with motion (zoom-in effect)
+        clip.write_videofile(temp.name, codec="libx264", audio=False)
+
+        # Send the generated video back to the client
+        return send_file(temp.name, mimetype="video/mp4", as_attachment=True, download_name="output_with_motion.mp4")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8080)      
