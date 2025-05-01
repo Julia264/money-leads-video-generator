@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 import os
 import threading
 import logging
-from train_lora import train_lora  # Make sure this file is named train_lora.py or adjust the import
+from train_lora import train_lora_test_peter.py
+  # Make sure this file is named train_lora.py or adjust the import
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
