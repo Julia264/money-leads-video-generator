@@ -1,11 +1,10 @@
 from flask import Flask, request, send_file, send_from_directory
 from flask_cors import CORS
 from PIL import Image
-from diffusers import StableVideoDiffusionPipeline
+from diffusers import StableVideoDiffusionPipeline, UNet2DConditionModel
 from diffusers.utils import export_to_video
 import torch
 import tempfile
-import numpy as np
 import os
 
 app = Flask(__name__, static_url_path='/static')
@@ -18,15 +17,24 @@ pipe = StableVideoDiffusionPipeline.from_pretrained(
     variant="fp16"
 )
 
-# First move the pipeline to GPU (if available)
+# Load your custom UNet model
+custom_unet_path = "/home/ubuntu/money-leads-video-generator/peter_model/final_model_peter/unet"
+try:
+    # Try loading as a full model first
+    pipe.unet = UNet2DConditionModel.from_pretrained(
+        custom_unet_path,
+        torch_dtype=torch.float16
+    )
+except:
+    # Fall back to trying to load just LoRA weights
+    pipe.unet.load_attn_procs(
+        custom_unet_path,
+        use_safetensors=False  # Set to True if using .safetensors format
+    )
+
+# Move to GPU if available
 device = "cuda" if torch.cuda.is_available() else "cpu"
 pipe = pipe.to(device)
-
-# Then load your custom trained LoRA weights
-pipe.unet.load_attn_procs(
-    "/home/ubuntu/money-leads-video-generator/peter_model/final_model_peter/unet",
-    use_safetensors=False  # Set to True if your LoRA uses .safetensors format
-)
 
 # Enable memory efficient attention if available
 if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
@@ -38,6 +46,7 @@ def index():
 
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
+    temp_path = None
     try:
         # Get the uploaded image
         image_file = request.files["image"]
@@ -52,8 +61,8 @@ def generate_video():
             decode_chunk_size=4,  # Reduced for memory constraints
             motion_bucket_id=180,
             noise_aug_strength=0.1,
-            num_frames=25,  # Number of frames to generate
-            num_inference_steps=25  # Number of denoising steps
+            num_frames=25,
+            num_inference_steps=25
         ).frames[0]
         
         # Save to temporary file
@@ -74,7 +83,7 @@ def generate_video():
         return {"error": str(e)}, 500
     
     finally:
-        if 'temp_path' in locals() and os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)
 
 if __name__ == "__main__":
