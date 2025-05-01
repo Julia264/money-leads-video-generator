@@ -1,1 +1,45 @@
+from flask import Flask, request, jsonify
+import os
+import threading
+import logging
+from train_lora import train_lora  # Make sure this file is named train_lora.py or adjust the import
+
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+
+@app.route("/")
+def home():
+    return "LoRA Training API is running!"
+
+@app.route("/train", methods=["POST"])
+def trigger_training():
+    try:
+        data = request.get_json()
+        zip_path = data.get("zip_path")
+        output_dir = data.get("output_dir")
+        action = data.get("action", "clapping")
+
+        if not zip_path or not output_dir:
+            return jsonify({"error": "zip_path and output_dir are required"}), 400
+
+        if not os.path.exists(zip_path):
+            return jsonify({"error": f"Zip file not found at {zip_path}"}), 404
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Run training in a background thread so the API doesn't block
+        thread = threading.Thread(target=train_lora, args=(zip_path, output_dir, action))
+        thread.start()
+
+        return jsonify({
+            "status": "training_started",
+            "message": f"Training started for action '{action}'. Model will be saved in {output_dir}"
+        })
+
+    except Exception as e:
+        logging.exception("Training failed")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080, debug=True)
 
