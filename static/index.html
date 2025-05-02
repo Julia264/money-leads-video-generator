@@ -1,50 +1,55 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Money Leads Video Generator</title>
-  <link rel="stylesheet" href="/static/style.css">
+    <title>Video Generator</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #video-container { margin-top: 20px; }
+        #generated-video { max-width: 100%; }
+    </style>
 </head>
 <body>
-  <div class="container">
     <h1>Money Leads Video Generator</h1>
-    <form id="uploadForm" enctype="multipart/form-data">
-      <input type="file" name="image" accept="image/*" required />
-      <button type="submit">Generate Video</button>
+    <form id="video-form">
+        <input type="file" id="image-input" accept="image/*" required>
+        <button type="submit">Generate Video</button>
     </form>
-
-    <div id="loader" class="loader-container" style="display: none;">
-      <div class="loader"></div>
-      <p>Processing... Please wait</p>
+    
+    <div id="video-container" style="display: none;">
+        <h2>Generated Video</h2>
+        <video id="generated-video" controls></video>
     </div>
 
-    <video id="outputVideo" controls style="display: none; margin-top: 20px;"></video>
-  </div>
-
-  <script>
-    const form = document.getElementById('uploadForm');
-    const loader = document.getElementById('loader');
-    const video = document.getElementById('outputVideo');
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      loader.style.display = 'block';
-      video.style.display = 'none';
-
-      const formData = new FormData(form);
-      const response = await fetch('/generate-video', {
-        method: 'POST',
-        body: formData
-      });
-
-      const blob = await response.blob();
-      const videoUrl = URL.createObjectURL(blob);
-
-      video.src = videoUrl;
-      video.style.display = 'block';
-      loader.style.display = 'none';
-    });
-  </script>
+    <script>
+        document.getElementById('video-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('image', document.getElementById('image-input').files[0]);
+            
+            try {
+                const response = await fetch('/generate-video', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Video generation failed');
+                }
+                
+                const videoBlob = await response.blob();
+                const videoUrl = URL.createObjectURL(videoBlob);
+                
+                const videoContainer = document.getElementById('video-container');
+                const videoElement = document.getElementById('generated-video');
+                
+                videoElement.src = videoUrl;
+                videoContainer.style.display = 'block';
+            } catch (error) {
+                alert(error.message);
+                console.error('Error:', error);
+            }
+        });
+    </script>
 </body>
 </html>
