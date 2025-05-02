@@ -13,7 +13,7 @@ app = Flask(__name__, static_folder="static")
 CORS(app)
 
 # Load the base model
-model_path = "./final_model"
+model_path = "/home/ubuntu/money-leads-video-generator/peter_model2"
 base_model = "runwayml/stable-diffusion-v1-5"
 
 # Initialize pipeline
