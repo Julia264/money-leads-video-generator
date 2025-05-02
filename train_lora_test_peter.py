@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from diffusers import StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
-from lora_diffusion import inject_trainable_lora
+from lora_diffusion import inject_trainable_lora, save_lora_weight
 from diffusers.training_utils import set_seed
 import logging
 from tqdm import tqdm
@@ -40,11 +40,9 @@ class PTFileDataset(Dataset):
                 with zip_ref.open(file_path) as pt_file:
                     tensor = torch.load(pt_file, map_location='cpu')
                     
-                    # Convert to FP32 first if needed
                     if tensor.dtype == torch.float16:
                         tensor = tensor.float()
                     
-                    # Validate tensor
                     if tensor.dim() != 3 or tensor.size(0) != 3:
                         logger.warning(f"Unexpected tensor shape {tensor.shape} in {file_path}")
                         return None, None
@@ -53,7 +51,6 @@ class PTFileDataset(Dataset):
                         logger.warning(f"Invalid tensor values in {file_path}")
                         return None, None
                         
-                    # Normalize images to [-1, 1] if they aren't already
                     if tensor.min() >= 0 and tensor.max() > 1:
                         tensor = (tensor / 127.5) - 1.0
                         
@@ -76,12 +73,18 @@ def safe_collate(batch):
     images, prompts = zip(*batch)
     return torch.stack(images), list(prompts)
 
-def inject_lora(unet, r=4):
+def inject_lora(unet, text_encoder, r=4):
     try:
+        # Inject LoRA into both UNet and text encoder
         inject_trainable_lora(
             unet,
             r=r,
             target_replace_module=["CrossAttention", "Attention"],
+        )
+        inject_trainable_lora(
+            text_encoder,
+            r=r,
+            target_replace_module=["CLIPAttention"],
         )
         logger.info("Successfully injected LoRA layers")
     except Exception as e:
@@ -89,31 +92,28 @@ def inject_lora(unet, r=4):
         raise
 
 def train_lora(zip_path, output_dir, action='clapping'):
-    # Initialize accelerator WITHOUT mixed precision
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
-        mixed_precision='no'  # Disable mixed precision to avoid gradient issues
+        mixed_precision='no'
     )
     set_seed(42)
     
-    # Enable memory efficient attention
     if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
         torch.backends.cuda.enable_flash_sdp(True)
     if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
         torch.backends.cuda.enable_mem_efficient_sdp(True)
 
-    # Load pipeline with FP32 weights (changed from FP16)
     logger.info("Loading Stable Diffusion pipeline...")
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
-        torch_dtype=torch.float32,  # Changed to FP32
+        torch_dtype=torch.float32,
         safety_checker=None,
         requires_safety_checker=False,
     ).to(accelerator.device)
     
     pipe.scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
 
-    # Freeze components
+    # Freeze base model
     pipe.unet.requires_grad_(False)
     pipe.vae.requires_grad_(False)
     pipe.text_encoder.requires_grad_(False)
@@ -121,10 +121,10 @@ def train_lora(zip_path, output_dir, action='clapping'):
     # Load text components
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
-    text_encoder = text_encoder.to(dtype=torch.float32)  # Changed to FP32
+    text_encoder = text_encoder.to(dtype=torch.float32)
 
     # Inject LoRA
-    inject_lora(pipe.unet)
+    inject_lora(pipe.unet, pipe.text_encoder)
 
     # Prepare datasets
     logger.info("Preparing datasets...")
@@ -149,16 +149,15 @@ def train_lora(zip_path, output_dir, action='clapping'):
         persistent_workers=True
     )
 
-    # Optimizer
+    # Optimizer only for LoRA parameters
     optimizer = torch.optim.AdamW(
-        pipe.unet.parameters(),
+        list(pipe.unet.parameters()) + list(text_encoder.parameters()),
         lr=1e-5,
         betas=(0.9, 0.999),
         weight_decay=1e-2,
         eps=1e-8
     )
 
-    # Learning rate scheduler
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, 
         T_max=len(train_dataloader) * 5,
@@ -166,8 +165,8 @@ def train_lora(zip_path, output_dir, action='clapping'):
     )
 
     # Prepare with accelerator
-    pipe.unet, optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
-        pipe.unet, optimizer, train_dataloader, val_dataloader, lr_scheduler
+    pipe.unet, text_encoder, optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
+        pipe.unet, text_encoder, optimizer, train_dataloader, val_dataloader, lr_scheduler
     )
 
     # Training loop
@@ -177,25 +176,21 @@ def train_lora(zip_path, output_dir, action='clapping'):
     logger.info("Starting training...")
     for epoch in range(num_epochs):
         pipe.unet.train()
+        text_encoder.train()
         epoch_loss = 0
         valid_batches = 0
         
-        for step, batch in enumerate(train_dataloader):
+        for step, batch in enumerate(tqdm(train_dataloader)):
             if batch is None or batch[0] is None:
                 continue
 
             images, captions = batch
-            images = images.to(accelerator.device)
-            
-            # Keep images in FP32
-            images = images.float()
+            images = images.to(accelerator.device).float()
 
             with torch.no_grad():
-                # Encode images to latents
                 latents = pipe.vae.encode(images).latent_dist.sample()
-                latents = latents * 0.18215  # Scale factor
+                latents = latents * 0.18215
                 
-                # Encode text
                 input_ids = tokenizer(
                     captions,
                     padding="max_length",
@@ -205,7 +200,6 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 ).input_ids.to(accelerator.device)
                 encoder_hidden_states = text_encoder(input_ids).last_hidden_state
 
-            # Add noise
             noise = torch.randn_like(latents)
             timesteps = torch.randint(
                 0, pipe.scheduler.config.num_train_timesteps, 
@@ -214,26 +208,23 @@ def train_lora(zip_path, output_dir, action='clapping'):
             ).long()
             noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
-            # Forward pass
             model_pred = pipe.unet(
                 noisy_latents,
                 timesteps,
                 encoder_hidden_states=encoder_hidden_states
             ).sample
 
-            # Calculate loss
             loss = torch.nn.functional.mse_loss(
                 model_pred.float(), 
                 noise.float(), 
                 reduction="mean"
             )
 
-            # Backward pass
             accelerator.backward(loss)
             
-            # Gradient clipping
             if accelerator.sync_gradients:
                 torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(text_encoder.parameters(), 1.0)
             
             optimizer.step()
             optimizer.zero_grad()
@@ -253,6 +244,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
 
         # Validation
         pipe.unet.eval()
+        text_encoder.eval()
         val_loss = 0
         val_batches = 0
         with torch.no_grad():
@@ -298,20 +290,43 @@ def train_lora(zip_path, output_dir, action='clapping'):
                 best_val_loss = avg_val_loss
                 if accelerator.is_main_process:
                     save_path = os.path.join(output_dir, "best_model")
-                    pipe.save_pretrained(save_path, safe_serialization=False)
+                    os.makedirs(save_path, exist_ok=True)
+                    
+                    # Save full pipeline
+                    pipe.save_pretrained(save_path, safe_serialization=True)
+                    
+                    # Save LoRA weights separately
+                    save_lora_weight(
+                        pipe.unet, 
+                        os.path.join(save_path, "unet_lora_weights.bin")
+                    )
+                    save_lora_weight(
+                        pipe.text_encoder,
+                        os.path.join(save_path, "text_encoder_lora_weights.bin")
+                    )
                     logger.info(f"Saved best model with val loss: {best_val_loss:.4f}")
 
     # Final save
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        final_save_path = os.path.join(output_dir, "final_model_peter")
-        pipe.save_pretrained(final_save_path, safe_serialization=False)
+        final_save_path = os.path.join(output_dir, "final_model")
+        os.makedirs(final_save_path, exist_ok=True)
+        
+        pipe.save_pretrained(final_save_path, safe_serialization=True)
+        save_lora_weight(
+            pipe.unet,
+            os.path.join(final_save_path, "unet_lora_weights.bin")
+        )
+        save_lora_weight(
+            pipe.text_encoder,
+            os.path.join(final_save_path, "text_encoder_lora_weights.bin")
+        )
         logger.info(f"Training complete! Model saved at: {final_save_path}")
 
 if __name__ == "__main__":
     zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"
     output_dir = "/home/ubuntu/money-leads-video-generator/peter_model"
-    action = "clapping"  # Change to "waving" if needed
+    action = "clapping"
     
     os.makedirs(output_dir, exist_ok=True)
     
@@ -323,3 +338,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Training failed: {str(e)}")
         raise
+
