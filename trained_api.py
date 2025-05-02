@@ -1,9 +1,10 @@
+# Load the base model
 import os
 import torch
 from flask import Flask, request, send_file, send_from_directory
 from PIL import Image
 from diffusers import StableDiffusionImg2ImgPipeline
-from lora_diffusion import monkeypatch_lora
+from lora_diffusion import patch_pipe
 import numpy as np
 import tempfile
 from flask_cors import CORS
@@ -12,11 +13,12 @@ import cv2
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
-# Load the base model
+# Model paths
 model_path = "/home/ubuntu/money-leads-video-generator/peter_model2"
 base_model = "runwayml/stable-diffusion-v1-5"
 
 # Initialize pipeline
+logger.info("Loading base model...")
 pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
     base_model,
     torch_dtype=torch.float32,
@@ -24,14 +26,18 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
     requires_safety_checker=False
 )
 
-# Load and apply LoRA weights
-unet_lora_path = os.path.join(model_path, "unet_lora_weights.bin")
-text_encoder_lora_path = os.path.join(model_path, "text_encoder_lora_weights.bin")
-
-if os.path.exists(unet_lora_path):
-    monkeypatch_lora(pipe.unet, torch.load(unet_lora_path))
-if os.path.exists(text_encoder_lora_path):
-    monkeypatch_lora(pipe.text_encoder, torch.load(text_encoder_lora_path))
+# Load LoRA weights
+lora_path = os.path.join(model_path, "unet_lora_weights.bin")
+if os.path.exists(lora_path):
+    logger.info("Applying LoRA weights...")
+    patch_pipe(
+        pipe,
+        lora_path,
+        patch_text=False  # We're only using UNet LoRA in this example
+    )
+else:
+    logger.error(f"LoRA weights not found at {lora_path}")
+    raise FileNotFoundError(f"LoRA weights not found at {lora_path}")
 
 # Move to GPU and enable optimizations
 pipe.to("cuda")
