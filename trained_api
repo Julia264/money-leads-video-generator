@@ -36,7 +36,7 @@ pipe.enable_attention_slicing()
 def index():
     return send_from_directory("static", "index.html")
 
-@app.route("/generate", methods=["POST"])
+@app.route("/generate-video", methods=["POST"])
 def generate_video():
     if "image" not in request.files:
         return {"error": "No image uploaded"}, 400
