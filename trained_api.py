@@ -14,12 +14,17 @@ CORS(app)
 
 # Load the trained model
 model_path = "./peter_model/final_model_peter"
+
+# First load the pipeline to CPU
 pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
     model_path,
     torch_dtype=torch.float32,
     safety_checker=None,
-    requires_safety_checker=False,
-).to("cuda")
+    requires_safety_checker=False
+)
+
+# Then move to GPU
+pipe.to("cuda")
 
 # Enable optimizations
 pipe.enable_model_cpu_offload()
