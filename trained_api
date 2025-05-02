@@ -39,6 +39,7 @@ def index():
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
     if "image" not in request.files:
+        print("No image found in request.files:", request.files)
         return {"error": "No image uploaded"}, 400
 
     file = request.files["image"]
