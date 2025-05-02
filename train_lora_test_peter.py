@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from diffusers import StableDiffusionPipeline, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from accelerate import Accelerator
-from lora_diffusion import inject_trainable_lora, save_lora_weight
+from lora_diffusion import inject_trainable_lora, save_lora_weight, extract_lora_ups_down
 from diffusers.training_utils import set_seed
 import logging
 from tqdm import tqdm
@@ -73,23 +73,17 @@ def safe_collate(batch):
     images, prompts = zip(*batch)
     return torch.stack(images), list(prompts)
 
-def inject_lora(unet, text_encoder, r=4):
+def verify_lora_injection(model):
     try:
-        # Inject LoRA into both UNet and text encoder
-        inject_trainable_lora(
-            unet,
-            r=r,
-            target_replace_module=["CrossAttention", "Attention"],
-        )
-        inject_trainable_lora(
-            text_encoder,
-            r=r,
-            target_replace_module=["CLIPAttention"],
-        )
-        logger.info("Successfully injected LoRA layers")
+        # Check if LoRA layers exist
+        ups, downs = extract_lora_ups_down(model)
+        if len(ups) == 0 or len(downs) == 0:
+            raise ValueError("No LoRA layers found")
+        logger.info(f"Verified LoRA injection with {len(ups)} layers")
+        return True
     except Exception as e:
-        logger.error(f"Failed to inject LoRA: {str(e)}")
-        raise
+        logger.error(f"LoRA verification failed: {str(e)}")
+        return False
 
 def train_lora(zip_path, output_dir, action='clapping'):
     accelerator = Accelerator(
@@ -123,8 +117,31 @@ def train_lora(zip_path, output_dir, action='clapping'):
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").to(accelerator.device)
     text_encoder = text_encoder.to(dtype=torch.float32)
 
-    # Inject LoRA
-    inject_lora(pipe.unet, pipe.text_encoder)
+    # Inject LoRA with more verbose logging
+    logger.info("Injecting LoRA layers...")
+    try:
+        # Inject with larger rank (r=8) for better training
+        inject_trainable_lora(
+            pipe.unet,
+            r=8,  # Increased from 4 to 8
+            target_replace_module=["CrossAttention", "Attention"],
+        )
+        inject_trainable_lora(
+            pipe.text_encoder,
+            r=8,
+            target_replace_module=["CLIPAttention"],
+        )
+        logger.info("LoRA injection completed")
+        
+        # Verify injection
+        if not verify_lora_injection(pipe.unet):
+            raise ValueError("Failed to verify LoRA in UNet")
+        if not verify_lora_injection(pipe.text_encoder):
+            raise ValueError("Failed to verify LoRA in text encoder")
+            
+    except Exception as e:
+        logger.error(f"LoRA injection failed: {str(e)}")
+        raise
 
     # Prepare datasets
     logger.info("Preparing datasets...")
@@ -180,7 +197,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
         epoch_loss = 0
         valid_batches = 0
         
-        for step, batch in enumerate(tqdm(train_dataloader)):
+        for step, batch in enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch+1}")):
             if batch is None or batch[0] is None:
                 continue
 
@@ -292,19 +309,19 @@ def train_lora(zip_path, output_dir, action='clapping'):
                     save_path = os.path.join(output_dir, "best_model")
                     os.makedirs(save_path, exist_ok=True)
                     
-                    # Save full pipeline
-                    pipe.save_pretrained(save_path, safe_serialization=True)
-                    
-                    # Save LoRA weights separately
-                    save_lora_weight(
-                        pipe.unet, 
-                        os.path.join(save_path, "unet_lora_weights.bin")
-                    )
-                    save_lora_weight(
-                        pipe.text_encoder,
-                        os.path.join(save_path, "text_encoder_lora_weights.bin")
-                    )
-                    logger.info(f"Saved best model with val loss: {best_val_loss:.4f}")
+                    # Verify LoRA weights exist before saving
+                    if verify_lora_injection(pipe.unet) and verify_lora_injection(pipe.text_encoder):
+                        save_lora_weight(
+                            pipe.unet, 
+                            os.path.join(save_path, "unet_lora_weights.bin")
+                        )
+                        save_lora_weight(
+                            pipe.text_encoder,
+                            os.path.join(save_path, "text_encoder_lora_weights.bin")
+                        )
+                        logger.info(f"Saved LoRA weights with val loss: {best_val_loss:.4f}")
+                    else:
+                        logger.error("Failed to save LoRA weights - injection not verified")
 
     # Final save
     accelerator.wait_for_everyone()
@@ -312,16 +329,20 @@ def train_lora(zip_path, output_dir, action='clapping'):
         final_save_path = os.path.join(output_dir, "final_model")
         os.makedirs(final_save_path, exist_ok=True)
         
-        pipe.save_pretrained(final_save_path, safe_serialization=True)
-        save_lora_weight(
-            pipe.unet,
-            os.path.join(final_save_path, "unet_lora_weights.bin")
-        )
-        save_lora_weight(
-            pipe.text_encoder,
-            os.path.join(final_save_path, "text_encoder_lora_weights.bin")
-        )
-        logger.info(f"Training complete! Model saved at: {final_save_path}")
+        # Verify LoRA weights exist before saving
+        if verify_lora_injection(pipe.unet) and verify_lora_injection(pipe.text_encoder):
+            save_lora_weight(
+                pipe.unet,
+                os.path.join(final_save_path, "unet_lora_weights.bin")
+            )
+            save_lora_weight(
+                pipe.text_encoder,
+                os.path.join(final_save_path, "text_encoder_lora_weights.bin")
+            )
+            logger.info(f"Training complete! Model saved at: {final_save_path}")
+        else:
+            logger.error("Failed to save final LoRA weights - injection not verified")
+            raise ValueError("LoRA weights not properly injected")
 
 if __name__ == "__main__":
     zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"
