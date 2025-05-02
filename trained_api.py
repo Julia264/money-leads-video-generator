@@ -6,7 +6,7 @@ from diffusers import StableDiffusionImg2ImgPipeline
 import numpy as np
 import tempfile
 from flask_cors import CORS
-from moviepy.editor import ImageSequenceClip
+import cv2
 
 # Initialize Flask
 app = Flask(__name__, static_folder="static")
@@ -56,13 +56,21 @@ def generate_video():
             )
             
             frame = np.array(result.images[0])
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # Convert to BGR for OpenCV
             frames.append(frame)
 
-        # Create temporary video file
+        # Create temporary video file with OpenCV
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_file:
-            clip = ImageSequenceClip(frames, fps=4)
-            clip.write_videofile(tmp_file.name, codec="libx264", audio=False)
             video_path = tmp_file.name
+            
+        # Write video using OpenCV
+        height, width, _ = frames[0].shape
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, 4, (width, height))
+        
+        for frame in frames:
+            video_writer.write(frame)
+        video_writer.release()
 
         return send_file(video_path, mimetype="video/mp4")
 
