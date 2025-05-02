@@ -1,4 +1,3 @@
-# Load the base model
 import os
 import torch
 from flask import Flask, request, send_file, send_from_directory
@@ -9,6 +8,11 @@ import numpy as np
 import tempfile
 from flask_cors import CORS
 import cv2
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
