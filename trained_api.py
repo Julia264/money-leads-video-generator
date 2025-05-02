@@ -3,30 +3,38 @@ import torch
 from flask import Flask, request, send_file, send_from_directory
 from PIL import Image
 from diffusers import StableDiffusionImg2ImgPipeline
+from lora_diffusion import monkeypatch_lora
 import numpy as np
 import tempfile
 from flask_cors import CORS
 import cv2
 
-# Initialize Flask
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
-# Load the trained model
-model_path = "./peter_model/final_model_peter"
+# Load the base model
+model_path = "./final_model"
+base_model = "runwayml/stable-diffusion-v1-5"
 
-# First load the pipeline to CPU
+# Initialize pipeline
 pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-    model_path,
+    base_model,
     torch_dtype=torch.float32,
     safety_checker=None,
     requires_safety_checker=False
 )
 
-# Then move to GPU
-pipe.to("cuda")
+# Load and apply LoRA weights
+unet_lora_path = os.path.join(model_path, "unet_lora_weights.bin")
+text_encoder_lora_path = os.path.join(model_path, "text_encoder_lora_weights.bin")
 
-# Enable optimizations
+if os.path.exists(unet_lora_path):
+    monkeypatch_lora(pipe.unet, torch.load(unet_lora_path))
+if os.path.exists(text_encoder_lora_path):
+    monkeypatch_lora(pipe.text_encoder, torch.load(text_encoder_lora_path))
+
+# Move to GPU and enable optimizations
+pipe.to("cuda")
 pipe.enable_model_cpu_offload()
 pipe.enable_vae_tiling()
 pipe.enable_attention_slicing()
@@ -46,29 +54,29 @@ def generate_video():
         img = img.resize((512, 512))
 
         prompt = "a person clapping hands"
-        num_frames = 8  # Number of frames for the video
+        num_frames = 8
         frames = []
 
         for i in range(num_frames):
-            strength = 0.5 + (i * 0.05)  # Gradually increase strength
+            strength = 0.5 + (i * 0.05)
             
             result = pipe(
                 prompt=prompt,
                 image=img,
                 num_inference_steps=30,
-                strength=min(strength, 0.9),  # Cap strength at 0.9
+                strength=min(strength, 0.9),
                 guidance_scale=7.5
             )
             
             frame = np.array(result.images[0])
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # Convert to BGR for OpenCV
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             frames.append(frame)
 
-        # Create temporary video file with OpenCV
+        # Create temporary video file
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_file:
             video_path = tmp_file.name
             
-        # Write video using OpenCV
+        # Write video
         height, width, _ = frames[0].shape
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         video_writer = cv2.VideoWriter(video_path, fourcc, 4, (width, height))
