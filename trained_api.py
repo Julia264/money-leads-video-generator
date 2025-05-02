@@ -17,37 +17,68 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
-# Model paths
-model_path = "/home/ubuntu/money-leads-video-generator/peter_model2"
-base_model = "runwayml/stable-diffusion-v1-5"
+# Model paths - make these configurable via environment variables
+MODEL_DIR = os.getenv("MODEL_DIR", "/home/ubuntu/money-leads-video-generator/peter_model2")
+BASE_MODEL = os.getenv("BASE_MODEL", "runwayml/stable-diffusion-v1-5")
 
-# Initialize pipeline
-logger.info("Loading base model...")
-pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
-    base_model,
-    torch_dtype=torch.float32,
-    safety_checker=None,
-    requires_safety_checker=False
-)
+def load_model_with_lora():
+    """Load the base model and apply LoRA weights"""
+    try:
+        logger.info(f"Loading base model: {BASE_MODEL}")
+        pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
+            BASE_MODEL,
+            torch_dtype=torch.float32,
+            safety_checker=None,
+            requires_safety_checker=False
+        )
 
-# Load LoRA weights
-lora_path = os.path.join(model_path, "unet_lora_weights.bin")
-if os.path.exists(lora_path):
-    logger.info("Applying LoRA weights...")
-    patch_pipe(
-        pipe,
-        lora_path,
-        patch_text=False  # We're only using UNet LoRA in this example
-    )
-else:
-    logger.error(f"LoRA weights not found at {lora_path}")
-    raise FileNotFoundError(f"LoRA weights not found at {lora_path}")
+        # Try multiple possible locations for LoRA weights
+        possible_lora_paths = [
+            os.path.join(MODEL_DIR, "unet_lora_weights.bin"),
+            os.path.join(MODEL_DIR, "pytorch_lora_weights.bin"),
+            os.path.join(MODEL_DIR, "lora_weights.bin")
+        ]
 
-# Move to GPU and enable optimizations
-pipe.to("cuda")
-pipe.enable_model_cpu_offload()
-pipe.enable_vae_tiling()
-pipe.enable_attention_slicing()
+        lora_path = None
+        for path in possible_lora_paths:
+            if os.path.exists(path):
+                lora_path = path
+                break
+
+        if lora_path:
+            logger.info(f"Applying LoRA weights from {lora_path}")
+            patch_pipe(
+                pipe,
+                lora_path,
+                patch_text=False
+            )
+            logger.info("Successfully loaded LoRA weights")
+        else:
+            logger.warning("No LoRA weights found, using base model only")
+
+        # Move to GPU and enable optimizations
+        if torch.cuda.is_available():
+            logger.info("Moving model to GPU...")
+            pipe.to("cuda")
+            pipe.enable_model_cpu_offload()
+            pipe.enable_vae_tiling()
+            pipe.enable_attention_slicing()
+        else:
+            logger.warning("CUDA not available, using CPU")
+
+        return pipe
+
+    except Exception as e:
+        logger.error(f"Failed to initialize model: {str(e)}")
+        raise
+
+# Load the model when starting the app
+try:
+    pipe = load_model_with_lora()
+    logger.info("Model loaded successfully")
+except Exception as e:
+    logger.error(f"Failed to load model: {str(e)}")
+    raise
 
 @app.route("/")
 def index():
@@ -56,10 +87,12 @@ def index():
 @app.route("/generate-video", methods=["POST"])
 def generate_video():
     if "image" not in request.files:
+        logger.error("No image uploaded in request")
         return {"error": "No image uploaded"}, 400
 
     try:
         file = request.files["image"]
+        logger.info("Processing image...")
         img = Image.open(file.stream).convert("RGB")
         img = img.resize((512, 512))
 
@@ -67,8 +100,10 @@ def generate_video():
         num_frames = 8
         frames = []
 
+        logger.info(f"Generating {num_frames} frames...")
         for i in range(num_frames):
             strength = 0.5 + (i * 0.05)
+            logger.debug(f"Generating frame {i+1} with strength {min(strength, 0.9)}")
             
             result = pipe(
                 prompt=prompt,
@@ -95,10 +130,13 @@ def generate_video():
             video_writer.write(frame)
         video_writer.release()
 
+        logger.info("Video generation complete")
         return send_file(video_path, mimetype="video/mp4")
 
     except Exception as e:
+        logger.error(f"Error during video generation: {str(e)}")
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
+    logger.info("Starting Flask server...")
     app.run(host="0.0.0.0", port=8000, debug=True)
