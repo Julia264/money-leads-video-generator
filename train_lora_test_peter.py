@@ -325,7 +325,7 @@ def train_lora(zip_path, output_dir, action='clapping'):
 
 if __name__ == "__main__":
     zip_path = "/home/ubuntu/money-leads-video-generator/Dataset2.zip"
-    output_dir = "/home/ubuntu/money-leads-video-generator/peter_model"
+    output_dir = "/home/ubuntu/money-leads-video-generator/peter_model2"
     action = "clapping"
     
     os.makedirs(output_dir, exist_ok=True)
