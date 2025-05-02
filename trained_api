@@ -7,9 +7,11 @@ from moviepy import ImageSequenceClip
 import numpy as np
 import tempfile
 from lora_diffusion import inject_trainable_lora
+from flask_cors import CORS
 
 # إعداد Flask
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
+
 CORS(app)
 
 # تحميل الموديل المدرّب
